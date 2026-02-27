@@ -57,5 +57,23 @@
     "vitest": "^4.0.18"
   },
   "sideEffects": false,
-  "license": "ISC"
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/t-k/qwik-swr.git"
+  },
+  "homepage": "https://github.com/t-k/qwik-swr#readme",
+  "bugs": {
+    "url": "https://github.com/t-k/qwik-swr/issues"
+  },
+  "keywords": [
+    "qwik",
+    "swr",
+    "stale-while-revalidate",
+    "data-fetching",
+    "cache",
+    "hooks",
+    "realtime",
+    "subscription"
+  ]
 }
