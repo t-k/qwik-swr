@@ -1,0 +1,61 @@
+{
+  "name": "qwik-swr",
+  "version": "0.1.0",
+  "description": "Lightweight Stale-While-Revalidate data fetching library for Qwik",
+  "type": "module",
+  "main": "./lib/index.qwik.mjs",
+  "qwik": "./lib/index.qwik.mjs",
+  "types": "./lib-types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib-types/index.d.ts",
+      "import": "./lib/index.qwik.mjs",
+      "require": "./lib/index.qwik.cjs"
+    },
+    "./subscription": {
+      "types": "./lib-types/subscription/index.d.ts",
+      "import": "./lib/subscription.qwik.mjs",
+      "require": "./lib/subscription.qwik.cjs"
+    },
+    "./storage": {
+      "types": "./lib-types/storage/index.d.ts",
+      "import": "./lib/storage.qwik.mjs",
+      "require": "./lib/storage.qwik.cjs"
+    },
+    "./devtools": {
+      "types": "./lib-types/devtools/index.d.ts",
+      "import": "./lib/devtools.qwik.mjs",
+      "require": "./lib/devtools.qwik.cjs"
+    }
+  },
+  "files": [
+    "lib",
+    "lib-types"
+  ],
+  "scripts": {
+    "build.lib": "vite build --mode lib",
+    "build.types": "tsc --project tsconfig.lib.json",
+    "build": "npm run build.lib && npm run build.types",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint",
+    "fmt": "oxfmt --write src/ tests/ storage/ devtools/",
+    "test:e2e": "npx playwright test"
+  },
+  "peerDependencies": {
+    "@builder.io/qwik": ">=1.5.0"
+  },
+  "devDependencies": {
+    "@builder.io/qwik": "^1.12.1",
+    "@playwright/test": "^1.58.1",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^28.0.0",
+    "oxfmt": "^0.28.0",
+    "oxlint": "^1.43.0",
+    "typescript": "^5.7.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
+  },
+  "sideEffects": false,
+  "license": "ISC"
+}

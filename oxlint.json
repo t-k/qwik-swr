@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicolo-ribaudo/oxc-config-schema/refs/heads/main/schema.json",
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-console": "warn"
+  },
+  "ignorePatterns": [
+    "lib/",
+    "lib-types/",
+    "node_modules/",
+    "dist/"
+  ]
+}

@@ -1,0 +1,12 @@
+node_modules/
+/lib/
+/lib-types/
+/dist/
+*.log
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+playwright-report/
+test-results/
+examples/basic/dist/

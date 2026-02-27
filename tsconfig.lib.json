@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationDir": "./lib-types",
+    "outDir": "./lib-types",
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src", "storage", "devtools"],
+  "exclude": ["tests"]
+}
