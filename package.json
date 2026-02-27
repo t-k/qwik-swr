@@ -49,9 +49,9 @@
     "@builder.io/qwik": "^1.12.1",
     "@playwright/test": "^1.58.1",
     "fake-indexeddb": "^6.2.5",
-    "jsdom": "^28.0.0",
-    "oxfmt": "^0.28.0",
-    "oxlint": "^1.43.0",
+    "jsdom": "^28.1.0",
+    "oxfmt": "^0.35.0",
+    "oxlint": "^1.50.0",
     "typescript": "^5.7.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
