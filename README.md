@@ -126,7 +126,7 @@ The main hook for data fetching.
 
 | Param      | Type                                                         | Description                                                             |
 | ---------- | ------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `key`      | `string \| readonly KeyAtom[] \| null \| undefined \| false` | Cache key. Pass a falsy value to disable fetching.                      |
+| `key`      | `SWRKey \| Signal<SWRKey>`                                   | Cache key. Pass a falsy value to disable fetching. Wrap in a Signal for reactive key changes. |
 | `fetcher$` | `QRL<(ctx: FetcherCtx) => Data \| Promise<Data>>`            | QRL-wrapped fetcher function. Receives `{ rawKey, hashedKey, signal }`. |
 | `options?` | `SWROptions<Data>`                                           | Per-hook configuration (see below).                                     |
 
@@ -200,6 +200,7 @@ stateDiagram-v2
 | `retryInterval`    | `number \| (count, error) => number`       | `1000`                   | Retry delay in ms (exponential backoff applied)                  |
 | `timeout`          | `number`                                   | `30000`                  | Fetch timeout in ms                                              |
 | `fallbackData`     | `Data`                                     | --                       | Initial data (e.g. from SSR)                                     |
+| `keepPreviousData` | `boolean`                                  | `false`                  | Keep previous key's data while fetching new key (Signal keys)    |
 | `enabled`          | `boolean`                                  | `true`                   | Set `false` to disable the hook entirely                         |
 | `eagerness`        | `"visible" \| "load" \| "idle"`            | `"visible"`              | Maps to Qwik's `useVisibleTask$` strategy                        |
 | `onSuccess$`       | `QRL<(data, key) => void>`                 | --                       | Callback on successful fetch                                     |
@@ -487,7 +488,7 @@ const { data } = useSWR(
 );
 ```
 
-> **Note**: `useSWR` captures the key once at mount time. For reactive keys (e.g. pagination), extract the fetching logic into a child component and use the `key` prop to force remount when the key changes. See `examples/basic/src/routes/demo/pagination/` for a working example.
+> **Note**: You can use `Signal<SWRKey>` for reactive keys (e.g. pagination) to automatically re-fetch when the key changes. Alternatively, extract the fetching logic into a child component and use the `key` prop to force remount. Use `keepPreviousData: true` for smooth pagination transitions. See `examples/basic/src/routes/demo/pagination/` for a working example.
 
 ### Conditional Fetching
 
@@ -496,6 +497,58 @@ Pass `null`, `undefined`, or `false` as the key to disable fetching. The hook re
 ```tsx
 const { data } = useSWR(userId ? `/api/users/${userId}` : null, fetcher$);
 ```
+
+You can also use a `Signal<SWRKey>` for reactive conditional fetching:
+
+```tsx
+import { useSignal, useComputed$ } from "@builder.io/qwik";
+
+const token = useSignal<string | null>(null);
+const keySignal = useComputed$(() => (token.value ? `/api/me` : null));
+const { data } = useSWR(keySignal, fetcher$);
+```
+
+### Reactive Keys (Signal)
+
+Wrap the key in a `Signal<SWRKey>` to automatically re-fetch when the key changes. This is useful for authentication-dependent keys, feature flags, or dynamic filters.
+
+```tsx
+import { useSignal, useComputed$, component$, $ } from "@builder.io/qwik";
+import { useSWR } from "qwik-swr";
+
+export default component$(() => {
+  const userId = useSignal<number | null>(null);
+
+  // Key is null until user logs in, then becomes "/api/users/123"
+  const keySignal = useComputed$(() =>
+    userId.value !== null ? `/api/users/${userId.value}` : null,
+  );
+
+  const { data, status } = useSWR(
+    keySignal,
+    $(async (ctx) => {
+      const res = await fetch(ctx.rawKey, { signal: ctx.signal });
+      return res.json();
+    }),
+  );
+
+  return <div>{/* ... */}</div>;
+});
+```
+
+When the Signal value changes:
+- **disabled -> valid**: fetch starts
+- **valid -> disabled**: state resets to idle, resources cleaned up
+- **valid A -> valid B**: A's lifecycle is torn down, B's fetch starts
+
+Use `keepPreviousData: true` to retain the old key's data until the new key's data arrives:
+
+```tsx
+const { data } = useSWR(keySignal, fetcher$, { keepPreviousData: true });
+// data shows previous key's value while new key is loading
+```
+
+> **Note**: `keepPreviousData` does NOT preserve data when transitioning to a disabled key (null/undefined/false). Disabled transitions always reset state.
 
 ### Freshness Presets
 

@@ -1,4 +1,4 @@
-import { component$, $, useSignal, useVisibleTask$ } from "@builder.io/qwik";
+import { component$, $, useSignal, useComputed$, useVisibleTask$ } from "@builder.io/qwik";
 import { routeLoader$ } from "@builder.io/qwik-city";
 import { useSWR, _getSubscriberCounts } from "qwik-swr";
 import type { Post, User } from "~/lib/mock-db";
@@ -76,7 +76,7 @@ const BasicFetchTab = component$(() => {
   );
 });
 
-// ── Tab 2: Pagination ──
+// ── Tab 2: Pagination (Signal key + keepPreviousData) ──
 
 interface UsersResponse {
   data: Array<{ id: number; name: string; email: string }>;
@@ -85,72 +85,36 @@ interface UsersResponse {
   totalPages: number;
 }
 
-const PageContent = component$<{ page: number; totalPages: number }>((props) => {
-  const swr = useSWR<UsersResponse>(
-    ["users", props.page] as const,
-    $(async (ctx) => {
-      const [, p] = ctx.rawKey;
-      const res = await fetch(`/api/users?page=${p}`, { signal: ctx.signal });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    }),
-  );
-
-  return (
-    <div>
-      {swr.isLoading && <p>Loading...</p>}
-
-      {swr.data && (
-        <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
-          <thead>
-            <tr style="border-bottom: 2px solid #ddd;">
-              <th style="text-align: left; padding: 8px;">ID</th>
-              <th style="text-align: left; padding: 8px;">Name</th>
-              <th style="text-align: left; padding: 8px;">Email</th>
-            </tr>
-          </thead>
-          <tbody>
-            {swr.data.data.map((user) => (
-              <tr key={user.id} style="border-bottom: 1px solid #eee;">
-                <td style="padding: 8px;">{user.id}</td>
-                <td style="padding: 8px;">{user.name}</td>
-                <td style="padding: 8px;">{user.email}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {swr.isValidating && <span style="color: #999; font-size: 13px;">Revalidating...</span>}
-
-      <SWRStateInspector
-        data={swr.data}
-        error={swr.error}
-        status={swr.status}
-        fetchStatus={swr.fetchStatus}
-        isLoading={swr.isLoading}
-        isSuccess={swr.isSuccess}
-        isError={swr.isError}
-        isValidating={swr.isValidating}
-        isStale={swr.isStale}
-      />
-    </div>
-  );
-});
-
 const PaginationTab = component$(() => {
   const page = useSignal(1);
   const totalPages = 4;
 
+  // Reactive key: changes when page changes
+  const keySignal = useComputed$(() => ["users", page.value] as readonly [string, number]);
+
+  const swr = useSWR<UsersResponse>(
+    keySignal,
+    $(async (ctx) => {
+      const [, p] = ctx.rawKey as readonly [string, number];
+      const res = await fetch(`/api/users?page=${p}`, { signal: ctx.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }),
+    { keepPreviousData: true },
+  );
+
   return (
     <div>
-      <h2>Array Key Pagination</h2>
+      <h2>Pagination (Signal Key + keepPreviousData)</h2>
       <p>
-        Use array key <code>["users", page]</code> to re-fetch when page changes. The page content
-        component remounts on page change via <code>key</code> prop.
+        Uses <code>Signal&lt;SWRKey&gt;</code> with <code>keepPreviousData: true</code> for smooth
+        page transitions. The previous page's data stays visible while the next page loads.
       </p>
 
-      <CodeBlock code={`useSWR(["users", page] as const, fetcher$)`} />
+      <CodeBlock
+        code={`const keySignal = useComputed$(() => ["users", page.value] as const);
+const swr = useSWR(keySignal, fetcher$, { keepPreviousData: true });`}
+      />
 
       <p>
         Current key: <code>{JSON.stringify(["users", page.value])}</code>
@@ -178,16 +142,61 @@ const PaginationTab = component$(() => {
         </button>
       </div>
 
-      <PageContent key={page.value} page={page.value} totalPages={totalPages} />
+      {swr.isLoading && <p>Loading...</p>}
+
+      {swr.data && (
+        <div>
+          {swr.isValidating && (
+            <span style="color: #999; font-size: 13px;">Loading new page (previous data shown)...</span>
+          )}
+          <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
+            <thead>
+              <tr style="border-bottom: 2px solid #ddd;">
+                <th style="text-align: left; padding: 8px;">ID</th>
+                <th style="text-align: left; padding: 8px;">Name</th>
+                <th style="text-align: left; padding: 8px;">Email</th>
+              </tr>
+            </thead>
+            <tbody>
+              {swr.data.data.map((user) => (
+                <tr key={user.id} style="border-bottom: 1px solid #eee;">
+                  <td style="padding: 8px;">{user.id}</td>
+                  <td style="padding: 8px;">{user.name}</td>
+                  <td style="padding: 8px;">{user.email}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <SWRStateInspector
+        data={swr.data}
+        error={swr.error}
+        status={swr.status}
+        fetchStatus={swr.fetchStatus}
+        isLoading={swr.isLoading}
+        isSuccess={swr.isSuccess}
+        isError={swr.isError}
+        isValidating={swr.isValidating}
+        isStale={swr.isStale}
+      />
     </div>
   );
 });
 
-// ── Tab 3: Conditional ──
+// ── Tab 3: Conditional (Signal Key) ──
 
-const UserDetail = component$<{ userId: number }>((props) => {
+const ConditionalTab = component$(() => {
+  const userId = useSignal<number | null>(null);
+
+  // Reactive key: null when no user selected, "/api/users/:id" when selected
+  const keySignal = useComputed$(() =>
+    userId.value !== null ? `/api/users/${userId.value}` : null,
+  );
+
   const swr = useSWR<User>(
-    `/api/users/${props.userId}`,
+    keySignal,
     $(async (ctx) => {
       const res = await fetch(ctx.rawKey as string, { signal: ctx.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -197,6 +206,50 @@ const UserDetail = component$<{ userId: number }>((props) => {
 
   return (
     <div>
+      <h2>Conditional Fetching (Signal Key)</h2>
+      <p>
+        Uses <code>Signal&lt;SWRKey&gt;</code> for reactive conditional fetching. When the Signal
+        value changes, the previous fetch is cleaned up and a new one starts automatically.
+        No remounting needed.
+      </p>
+
+      <CodeBlock
+        code={`const keySignal = useComputed$(() =>
+  userId.value !== null ? \`/api/users/\${userId.value}\` : null
+);
+const swr = useSWR(keySignal, fetcher$);`}
+      />
+
+      <div style="display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap;">
+        <button
+          style={{ background: userId.value === null ? "#e0e7ff" : "" }}
+          onClick$={() => {
+            userId.value = null;
+          }}
+        >
+          None (null key)
+        </button>
+        {[1, 2, 3, 5, 10].map((id) => (
+          <button
+            key={id}
+            style={{ background: userId.value === id ? "#e0e7ff" : "" }}
+            onClick$={() => {
+              userId.value = id;
+            }}
+          >
+            User {id}
+          </button>
+        ))}
+      </div>
+
+      <p>
+        Key: <code>{userId.value !== null ? `/api/users/${userId.value}` : "null"}</code>
+      </p>
+
+      {swr.status === "idle" && (
+        <p style="color: #999;">No user selected. Key is null.</p>
+      )}
+
       {swr.isLoading && <p>Loading...</p>}
 
       {swr.data && (
@@ -224,54 +277,6 @@ const UserDetail = component$<{ userId: number }>((props) => {
         isValidating={swr.isValidating}
         isStale={swr.isStale}
       />
-    </div>
-  );
-});
-
-const ConditionalTab = component$(() => {
-  const userId = useSignal<number | null>(null);
-
-  return (
-    <div>
-      <h2>Conditional Fetching</h2>
-      <p>
-        Pass <code>null</code> as key to disable fetching. Select a user ID to start. The detail
-        component mounts/unmounts based on selection.
-      </p>
-
-      <CodeBlock code={`useSWR(userId ? \`/api/users/\${userId}\` : null, fetcher$)`} />
-
-      <div style="display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap;">
-        <button
-          style={{ background: userId.value === null ? "#e0e7ff" : "" }}
-          onClick$={() => {
-            userId.value = null;
-          }}
-        >
-          None (null key)
-        </button>
-        {[1, 2, 3, 5, 10].map((id) => (
-          <button
-            key={id}
-            style={{ background: userId.value === id ? "#e0e7ff" : "" }}
-            onClick$={() => {
-              userId.value = id;
-            }}
-          >
-            User {id}
-          </button>
-        ))}
-      </div>
-
-      <p>
-        Key: <code>{userId.value ? `/api/users/${userId.value}` : "null"}</code>
-      </p>
-
-      {userId.value === null && (
-        <p style="color: #999;">No user selected. Component not mounted.</p>
-      )}
-
-      {userId.value !== null && <UserDetail key={userId.value} userId={userId.value} />}
     </div>
   );
 });
