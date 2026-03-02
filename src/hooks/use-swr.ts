@@ -1,15 +1,23 @@
-import { useStore, useVisibleTask$, useTask$, useContext, $ } from "@builder.io/qwik";
-import type { QRL } from "@builder.io/qwik";
-import type { SWRKey, ValidKey, Fetcher, SWROptions, SWRResponse } from "../types/index.ts";
+import { useStore, useVisibleTask$, useTask$, useContext, $, isSignal } from "@builder.io/qwik";
+import type { QRL, Signal } from "@builder.io/qwik";
+import type {
+  SWRKey,
+  ValidKey,
+  Fetcher,
+  SWROptions,
+  SWRResponse,
+  MaybeSignalSWRKey,
+} from "../types/index.ts";
 import { SWRConfigContext } from "../provider/swr-provider.tsx";
 import { resolveOptions } from "../utils/resolve-options.ts";
 import { hashKey } from "../utils/hash.ts";
 import { mapEagerness } from "./helpers.ts";
 import { createObserver } from "./create-observer.ts";
-import { setupFetchLifecycle } from "./use-fetch-lifecycle.ts";
+import { startFetchLifecycle, type ActiveLifecycle } from "./lifecycle-state.ts";
 import { performMutate, performRevalidate, type MutationContext } from "./create-mutations.ts";
 import { isContextNotFoundError } from "../utils/context-error.ts";
 import { isDev } from "../utils/env.ts";
+import { isDisabledKey } from "../utils/resolve-key.ts";
 
 // ═══════════════════════════════════════════════════════════════
 // useSWR hook
@@ -17,12 +25,6 @@ import { isDev } from "../utils/env.ts";
 
 /**
  * Overload 1: Valid key with type inference
- *
- * @remarks
- * The `key` parameter is captured by value at hook creation time and is
- * **not reactive**. Changing the key after mount will not trigger a re-fetch.
- * To fetch different keys conditionally, use separate `useSWR` calls or
- * pass `null`/`false` to disable.
  */
 export function useSWR<Data, K extends ValidKey>(
   key: K,
@@ -44,9 +46,16 @@ export function useSWR<Data, K extends ValidKey = ValidKey>(
   options?: SWROptions<Data>,
 ): SWRResponse<Data>;
 
+/** Overload 4: Signal key (reactive key changes) */
+export function useSWR<Data, K extends ValidKey = ValidKey>(
+  key: Signal<SWRKey>,
+  fetcher: QRL<Fetcher<Data, K>>,
+  options?: SWROptions<Data>,
+): SWRResponse<Data>;
+
 /** Implementation */
 export function useSWR<Data, K extends ValidKey = ValidKey>(
-  key: SWRKey,
+  key: MaybeSignalSWRKey,
   fetcher: QRL<Fetcher<Data, K>>,
   options?: SWROptions<Data>,
 ): SWRResponse<Data> {
@@ -64,10 +73,9 @@ export function useSWR<Data, K extends ValidKey = ValidKey>(
   }
 
   const resolved = resolveOptions(providerConfig, options);
+  const keyIsSignal = isSignal(key);
 
   // ─── State (useStore) ───
-  // QRL actions are assigned via useTask$ (not in render) to avoid
-  // "State mutation inside render function" error.
 
   const state = useStore<SWRResponse<Data>>({
     data: resolved.fallbackData as Data | undefined,
@@ -83,33 +91,57 @@ export function useSWR<Data, K extends ValidKey = ValidKey>(
     mutate$: undefined as unknown as SWRResponse<Data>["mutate$"],
   });
 
+  // ─── Key reference (shared with MutationContext) ───
+  // Mutable object so mutations always read the latest key.
+  const keyRef: { current: K | null | undefined | false } = {
+    current: (keyIsSignal ? key.value : key) as K | null | undefined | false,
+  };
+
   // ─── Lifecycle ───
 
   useVisibleTask$(
-    async ({ cleanup }) => {
-      if (key === null || key === undefined || key === false) return;
-      if (!resolved.enabled) return;
+    async ({ cleanup, track }) => {
+      // For Signal keys, track changes so this task re-runs on key change
+      const currentKey: SWRKey = keyIsSignal ? track(key as Signal<SWRKey>) : (key as SWRKey);
 
-      const validKey = key as K;
+      // Update keyRef for mutation context
+      keyRef.current = currentKey as K | null | undefined | false;
+
+      // If disabled, reset state (keepPreviousData does NOT preserve on disabled)
+      if (isDisabledKey(currentKey) || !resolved.enabled) {
+        resetStateToIdle(state, resolved);
+        return;
+      }
+
+      const validKey = currentKey as K;
       const hashed = hashKey(validKey);
       const fetcherFn = await fetcher.resolve();
 
+      // If keepPreviousData is false, reset state before fetching new key
+      if (!resolved.keepPreviousData) {
+        resetStateToIdle(state, resolved);
+      }
+      // If keepPreviousData is true, we leave data/status untouched until new data arrives
+
       const observer = createObserver<Data>(hashed, validKey, state, resolved);
 
-      setupFetchLifecycle(
-        { hashedKey: hashed, rawKey: validKey, fetcherFn, observer, resolved },
-        cleanup,
-      );
+      const lifecycle: ActiveLifecycle<Data> = startFetchLifecycle({
+        hashedKey: hashed,
+        rawKey: validKey,
+        fetcherFn,
+        observer,
+        resolved,
+      });
+
+      cleanup(() => lifecycle.teardown());
     },
     { strategy: mapEagerness(resolved.eagerness) },
   );
 
   // ─── Mutations ───
 
-  // Note: key is captured by value (not reactive). If key reactivity is added
-  // in the future, this context must be updated when the key changes (SF-5).
   const mutationCtx: MutationContext<Data, K> = {
-    key: key as K | null | undefined | false,
+    keyRef,
     state,
     resolved,
     fetcher,
@@ -131,4 +163,22 @@ export function useSWR<Data, K extends ValidKey = ValidKey>(
   });
 
   return state;
+}
+
+/**
+ * Reset state to idle (used on disabled key or key change without keepPreviousData).
+ */
+function resetStateToIdle<Data>(
+  state: SWRResponse<Data>,
+  resolved: import("../types/index.ts").ResolvedSWROptions<Data>,
+): void {
+  state.data = resolved.fallbackData as Data | undefined;
+  state.error = undefined;
+  state.status = resolved.fallbackData != null ? "success" : "idle";
+  state.fetchStatus = "idle";
+  state.isLoading = false;
+  state.isSuccess = resolved.fallbackData != null;
+  state.isError = false;
+  state.isValidating = false;
+  state.isStale = false;
 }

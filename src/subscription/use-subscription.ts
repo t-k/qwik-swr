@@ -1,7 +1,8 @@
-import { useStore, useVisibleTask$, useTask$, $, type QRL } from "@builder.io/qwik";
+import { useStore, useVisibleTask$, useTask$, $, isSignal, type QRL, type Signal } from "@builder.io/qwik";
 import type {
   SWRKey,
   ValidKey,
+  MaybeSignalSWRKey,
   SubscriptionOptions,
   SubscriptionResponse,
   SubscriptionStatus,
@@ -10,6 +11,7 @@ import type {
 } from "../types/index.ts";
 import { hashKey } from "../utils/hash.ts";
 import { generateId, isDev } from "../utils/env.ts";
+import { isDisabledKey } from "../utils/resolve-key.ts";
 import { subscriptionRegistry, type SubscriptionObserver } from "./subscription-registry.ts";
 import type { ResolvedCallbacks } from "./subscription-connect.ts";
 
@@ -106,11 +108,8 @@ function createObserverForHook<Data>(
  * The first hook for a key creates the connection; subsequent hooks join.
  * The last hook to unmount closes the connection.
  *
- * @remarks
- * The `key` parameter is captured by value at hook creation time and is
- * **not reactive**. Changing the key after mount will not automatically
- * re-subscribe. To subscribe to different keys conditionally, use separate
- * `useSubscription` calls or pass `null`/`false` to disable.
+ * Supports Signal<SWRKey> for reactive key changes. When the Signal value
+ * changes, the previous subscription is cleaned up and a new one starts.
  */
 // Overload 1: valid key
 export function useSubscription<Data, K extends ValidKey>(
@@ -130,25 +129,33 @@ export function useSubscription<Data, K extends ValidKey = ValidKey>(
   subscriber: QRL<Subscriber<Data, K>>,
   options?: SubscriptionOptions<Data>,
 ): SubscriptionResponse<Data>;
+// Overload 4: Signal key (reactive key changes)
+export function useSubscription<Data, K extends ValidKey = ValidKey>(
+  key: Signal<SWRKey>,
+  subscriber: QRL<Subscriber<Data, K>>,
+  options?: SubscriptionOptions<Data>,
+): SubscriptionResponse<Data>;
 // Implementation
 export function useSubscription<Data, K extends ValidKey = ValidKey>(
-  key: SWRKey,
+  key: MaybeSignalSWRKey,
   subscriber: QRL<Subscriber<Data, K>>,
   options?: SubscriptionOptions<Data>,
 ): SubscriptionResponse<Data> {
   const maxRetries = options?.maxRetries ?? 10;
   const retryInterval = options?.retryInterval ?? 1000;
   const connectionTimeout = options?.connectionTimeout ?? 30_000;
+  const keyIsSignal = isSignal(key);
 
   // Stable observer ID for this hook instance.
-  // Must be in useStore so it survives re-renders (component function re-runs).
-  // Uses crypto.randomUUID() for SSR safety (no module-level counter).
   const _ids = useStore({ observerId: generateId("sub-obs") });
   const observerId = _ids.observerId;
 
+  // Mutable key reference for QRL actions
+  const keyRef: { current: SWRKey } = {
+    current: keyIsSignal ? key.value : (key as SWRKey),
+  };
+
   // UI state (useStore) - each hook instance has its own state.
-  // QRL actions are assigned via useTask$ (not in render) to avoid
-  // "State mutation inside render function" error.
   const state = useStore<SubscriptionResponse<Data>>({
     data: undefined as Data | undefined,
     error: undefined as SWRError | undefined,
@@ -160,37 +167,42 @@ export function useSubscription<Data, K extends ValidKey = ValidKey>(
     reconnect$: undefined as unknown as QRL<() => void>,
   });
 
-  // Compute hashed key (null/undefined/false -> null)
-  const hashedKey =
-    key !== null && key !== undefined && key !== false ? hashKey(key as ValidKey) : null;
-
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(
-    async ({ cleanup }) => {
+    async ({ cleanup, track }) => {
+      const currentKey: SWRKey = keyIsSignal
+        ? track(key as Signal<SWRKey>)
+        : (key as SWRKey);
+
+      // Update keyRef for QRL actions
+      keyRef.current = currentKey;
+
       if (isDev()) {
         // eslint-disable-next-line no-console
         console.log(
-          `[qwik-swr] useVisibleTask$ BODY observer="${observerId}" key="${String(key)}"`,
+          `[qwik-swr] useVisibleTask$ BODY observer="${observerId}" key="${String(currentKey)}"`,
         );
       }
 
       // Null key: don't subscribe
-      if (hashedKey === null || key === null || key === undefined || key === false) {
+      if (isDisabledKey(currentKey)) {
         state.status = "disconnected";
         state.isConnecting = false;
         state.isDisconnected = true;
+        state.isLive = false;
         return;
       }
 
+      const hashed = hashKey(currentKey as ValidKey);
       const subscriberFn = await subscriber.resolve();
       const callbacks = await resolveOptionCallbacks(options);
       const observer = createObserverForHook(observerId, state, callbacks);
 
       if (isDev()) {
         // eslint-disable-next-line no-console
-        console.log(`[qwik-swr] ATTACH observer="${observerId}" key="${hashedKey}"`);
+        console.log(`[qwik-swr] ATTACH observer="${observerId}" key="${hashed}"`);
       }
-      subscriptionRegistry.attach(hashedKey, key as ValidKey, observer, subscriberFn, {
+      subscriptionRegistry.attach(hashed, currentKey as ValidKey, observer, subscriberFn, {
         maxRetries,
         retryInterval,
         connectionTimeout,
@@ -200,10 +212,10 @@ export function useSubscription<Data, K extends ValidKey = ValidKey>(
         if (isDev()) {
           // eslint-disable-next-line no-console
           console.warn(
-            `[qwik-swr] useVisibleTask$ CLEANUP observer="${observerId}" key="${String(key)}"`,
+            `[qwik-swr] useVisibleTask$ CLEANUP observer="${observerId}" key="${String(currentKey)}"`,
           );
         }
-        subscriptionRegistry.detach(hashedKey, observerId);
+        subscriptionRegistry.detach(hashed, observerId);
         state.status = "disconnected";
         state.isConnecting = false;
         state.isLive = false;
@@ -214,10 +226,12 @@ export function useSubscription<Data, K extends ValidKey = ValidKey>(
   );
 
   // Define QRLs in component body, assign to store via useTask$ to avoid
-  // render-time mutation error (useTask$ runs in TaskEvent context, not RenderEvent).
+  // render-time mutation error.
   const _unsubscribe$ = $(() => {
-    if (hashedKey) {
-      subscriptionRegistry.detach(hashedKey, observerId);
+    const currentKey = keyRef.current;
+    if (!isDisabledKey(currentKey)) {
+      const hashed = hashKey(currentKey as ValidKey);
+      subscriptionRegistry.detach(hashed, observerId);
     }
     state.status = "disconnected";
     state.isConnecting = false;
@@ -226,24 +240,25 @@ export function useSubscription<Data, K extends ValidKey = ValidKey>(
   });
 
   const _reconnect$ = $(async () => {
-    if (key === null || key === undefined || key === false || !hashedKey) return;
+    const currentKey = keyRef.current;
+    if (isDisabledKey(currentKey)) return;
 
+    const hashed = hashKey(currentKey as ValidKey);
     state.error = undefined;
 
-    const existingStatus = subscriptionRegistry.getStatus(hashedKey);
+    const existingStatus = subscriptionRegistry.getStatus(hashed);
     if (existingStatus !== null) {
       // Connection still exists in registry: reconnect the shared connection
-      await subscriptionRegistry.reconnect(hashedKey);
+      await subscriptionRegistry.reconnect(hashed);
     } else {
-      // Connection was fully closed (e.g. after unsubscribe$): re-resolve + re-attach
-      // First detach any stale observer to prevent leak (MF-4)
-      subscriptionRegistry.detach(hashedKey, observerId);
+      // Connection was fully closed: re-resolve + re-attach
+      subscriptionRegistry.detach(hashed, observerId);
 
       const subscriberFn = await subscriber.resolve();
       const callbacks = await resolveOptionCallbacks(options);
       const observer = createObserverForHook(observerId, state, callbacks);
 
-      subscriptionRegistry.attach(hashedKey, key as ValidKey, observer, subscriberFn, {
+      subscriptionRegistry.attach(hashed, currentKey as ValidKey, observer, subscriberFn, {
         maxRetries,
         retryInterval,
         connectionTimeout,
@@ -252,8 +267,6 @@ export function useSubscription<Data, K extends ValidKey = ValidKey>(
   });
 
   // Assign QRLs to store outside render context (TaskEvent, not RenderEvent).
-  // This avoids "State mutation inside render function" while keeping the store
-  // proxy as the return value for proper Qwik serialization/reactivity.
   useTask$(() => {
     if (isDev()) {
       // eslint-disable-next-line no-console

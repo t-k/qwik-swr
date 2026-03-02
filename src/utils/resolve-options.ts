@@ -18,6 +18,7 @@ const DEFAULTS: ResolvedQueryConfig = {
   retry: 3,
   retryInterval: 1000,
   timeout: 30_000,
+  keepPreviousData: false,
 };
 
 function normalizeRetry(retry: boolean | number | undefined): number | undefined {
@@ -85,6 +86,7 @@ export function resolveOptions<Data = unknown>(
     applyDefined(base, hookOptions);
     if (hookOptions.enabled !== undefined) base.enabled = hookOptions.enabled;
     if (hookOptions.fallbackData !== undefined) base.fallbackData = hookOptions.fallbackData;
+    if (hookOptions.keepPreviousData !== undefined) base.keepPreviousData = hookOptions.keepPreviousData;
     if (hookOptions.onSuccess$) base.onSuccess$ = hookOptions.onSuccess$;
     if (hookOptions.onError$) base.onError$ = hookOptions.onError$;
     const hookRetry = normalizeRetry(hookOptions.retry);

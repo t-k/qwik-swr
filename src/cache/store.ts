@@ -39,6 +39,7 @@ const DEFAULT_QUERY_CONFIG: ResolvedQueryConfig = {
   retry: 3,
   retryInterval: 1000,
   timeout: 30_000,
+  keepPreviousData: false,
 };
 
 // ═══════════════════════════════════════════════════════════════

@@ -4,6 +4,7 @@ export type {
   SWRKey,
   ValidKey,
   HashedKey,
+  MaybeSignalSWRKey,
   FetcherCtx,
   Fetcher,
   SWRErrorType,

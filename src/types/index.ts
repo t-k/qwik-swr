@@ -1,4 +1,4 @@
-import type { QRL } from "@builder.io/qwik";
+import type { QRL, Signal } from "@builder.io/qwik";
 
 // ═══════════════════════════════════════════════════════════════
 // Key Types
@@ -8,6 +8,9 @@ export type KeyAtom = string | number | boolean | null;
 export type SWRKey = string | readonly KeyAtom[] | null | undefined | false;
 export type ValidKey = Exclude<SWRKey, null | undefined | false>;
 export type HashedKey = string;
+
+/** A key that may be wrapped in a Qwik Signal for reactive key changes. */
+export type MaybeSignalSWRKey = SWRKey | Signal<SWRKey>;
 
 // ═══════════════════════════════════════════════════════════════
 // Fetcher Context
@@ -125,6 +128,8 @@ export interface CommonSWROptions {
 export interface SWROptions<Data = unknown> extends CommonSWROptions {
   fallbackData?: Data;
   enabled?: boolean;
+  /** Keep previous key's data while fetching new key's data. Resets on disabled transition. */
+  keepPreviousData?: boolean;
   onSuccess$?: QRL<(data: Data, key: ValidKey) => void>;
   onError$?: QRL<(error: SWRError, key: ValidKey) => void>;
 }
@@ -142,6 +147,7 @@ export interface ResolvedSWROptions<Data = unknown> {
   retry: number;
   retryInterval: number | ((retryCount: number, error: SWRError) => number);
   timeout: number;
+  keepPreviousData: boolean;
   onSuccess$?: QRL<(data: Data, key: ValidKey) => void>;
   onError$?: QRL<(error: SWRError, key: ValidKey) => void>;
 }
