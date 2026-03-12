@@ -5,15 +5,15 @@
   "type": "module",
   "main": "./lib/index.qwik.mjs",
   "qwik": "./lib/index.qwik.mjs",
-  "types": "./lib-types/index.d.ts",
+  "types": "./lib-types/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib-types/index.d.ts",
+      "types": "./lib-types/src/index.d.ts",
       "import": "./lib/index.qwik.mjs",
       "require": "./lib/index.qwik.cjs"
     },
     "./subscription": {
-      "types": "./lib-types/subscription/index.d.ts",
+      "types": "./lib-types/src/subscription/index.d.ts",
       "import": "./lib/subscription.qwik.mjs",
       "require": "./lib/subscription.qwik.cjs"
     },
