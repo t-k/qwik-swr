@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1] - 2026-03-12
+
+### Fixed
+
+- `types` paths in `package.json` for `.` and `./subscription` exports now point to correct `lib-types/src/` locations (fixes TS7016)
+
+### Chores
+
+- Add Dependabot configuration for npm and github-actions ecosystems
+
 ## [0.2.0] - 2026-03-02
 
 ### Added
