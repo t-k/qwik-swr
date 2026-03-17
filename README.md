@@ -137,15 +137,15 @@ The object returned by `useSWR`:
 
 | Signal         | Type                            | Description                                                     |
 | -------------- | ------------------------------- | --------------------------------------------------------------- |
-| `data`         | `Signal<Data \| undefined>`     | Fetched data                                                    |
-| `error`        | `Signal<SWRError \| undefined>` | Structured error with `type`, `message`, `retryCount`, `status` |
-| `status`       | `Signal<Status>`                | `"idle"` / `"loading"` / `"success"` / `"error"`                |
-| `fetchStatus`  | `Signal<FetchStatus>`           | `"idle"` / `"fetching"` / `"paused"`                            |
-| `isLoading`    | `Signal<boolean>`               | `true` when loading with no data yet                            |
-| `isSuccess`    | `Signal<boolean>`               | `true` when data is available                                   |
-| `isError`      | `Signal<boolean>`               | `true` when error occurred and no data                          |
-| `isValidating` | `Signal<boolean>`               | `true` during any fetch (including background)                  |
-| `isStale`      | `Signal<boolean>`               | `true` when data age exceeds `staleTime`                        |
+| `data`         | `Data \| undefined`             | Fetched data (`Data` when `fallbackData` is provided)           |
+| `error`        | `SWRError \| undefined`         | Structured error with `type`, `message`, `retryCount`, `status` |
+| `status`       | `Status`                        | `"idle"` / `"loading"` / `"success"` / `"error"`                |
+| `fetchStatus`  | `FetchStatus`                   | `"idle"` / `"fetching"` / `"paused"`                            |
+| `isLoading`    | `boolean`                       | `true` when loading with no data yet                            |
+| `isSuccess`    | `boolean`                       | `true` when data is available                                   |
+| `isError`      | `boolean`                       | `true` when error occurred and no data                          |
+| `isValidating` | `boolean`                       | `true` during any fetch (including background)                  |
+| `isStale`      | `boolean`                       | `true` when data age exceeds `staleTime`                        |
 
 | Method                    | Description                                                             |
 | ------------------------- | ----------------------------------------------------------------------- |
@@ -322,7 +322,7 @@ Infinite loading / pagination hook. Each page is cached individually and pages a
 
 | Field           | Type                                                        | Description                                      |
 | --------------- | ----------------------------------------------------------- | ------------------------------------------------ |
-| `data`          | `Data[] \| undefined`                                       | All loaded pages                                 |
+| `data`          | `Data[] \| undefined`                                       | All loaded pages (`Data[]` when `fallbackData` is provided) |
 | `error`         | `SWRError \| undefined`                                     | Latest error                                     |
 | `size`          | `number`                                                    | Current number of pages                          |
 | `setSize$`      | `QRL<(size \| (current) => size) => void>`                  | Set number of pages (triggers fetch)             |
@@ -775,12 +775,13 @@ export const usePostsLoader = routeLoader$(async () => {
 export default component$(() => {
   const loader = usePostsLoader();
 
+  // When fallbackData is provided, data is typed as Data (not Data | undefined)
   const { data } = useSWR("/api/posts", fetcher$, {
     fallbackData: loader.value,
   });
 
-  // data.value is available on first render -- no loading spinner
-  return <PostList posts={data.value} />;
+  // data is available on first render -- no loading spinner, no null checks
+  return <PostList posts={data} />;
 });
 ```
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.2] - 2026-03-17
+
+### Fixed
+
+- **Production build crash** -- Qwik optimizer crashes with "Cannot read properties of null (reading '0')" when processing `useSWRInfinite`. Nested function declarations (`executeFetch`, `abortCurrentFetch`) inside the hook body were captured by `$()` closures, which the optimizer cannot serialize across QRL boundaries. Extracted to module-level functions with context parameter. Dev mode was unaffected. ([#details](#qwik-optimizer-crash-details))
+
+### Added
+
+- `SWRResponseWithData<Data>` type -- when `fallbackData` is provided, `useSWR` returns `data: Data` instead of `data: Data | undefined`, eliminating unnecessary null checks
+- `SWRInfiniteResponseWithData<Data>` type -- same narrowing for `useSWRInfinite` with `fallbackData`
+- Build output compatibility test (`tests/build/optimizer-compat.test.ts`) -- automatically detects function declarations nested inside hook bodies that would crash the Qwik optimizer in consumer production builds
+- `test:build` and `test:all` npm scripts for build output verification
+
+### Notes
+
+#### Qwik optimizer crash details
+
+The `$()` function in Qwik creates a QRL boundary. All values captured by the closure must be serializable. Regular function declarations are not serializable, so capturing them from `$()` closures crashes the optimizer during production builds (the QRL extraction phase). This only manifests in production because dev mode skips QRL extraction.
+
+**Rule**: Never capture nested function declarations from `$()` closures. Instead, extract them to module-level functions and pass state via a context object. See `src/hooks/create-mutations.ts` (`MutationContext` + `performMutate`) for the canonical pattern.
+
 ## [0.3.1] - 2026-03-17
 
 ### Added
