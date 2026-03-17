@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { store } from "../../src/cache/store.ts";
 import { hashKey } from "../../src/utils/hash.ts";
 import { fetchAllPages, fetchPageWithRetry, calculateRetryDelay } from "../../src/hooks/infinite-helpers.ts";
-import type { SWRInfiniteKeyLoader, FetcherCtx, SWRError } from "../../src/types/index.ts";
+import type { SWRInfiniteKeyLoader, FetcherCtx, SWRError, ResolvedQueryConfig } from "../../src/types/index.ts";
 
 describe("swr-infinite integration tests", () => {
   beforeEach(() => {
@@ -739,6 +739,72 @@ describe("swr-infinite integration tests", () => {
       expect(calculateRetryDelay(0, err, customDelay)).toBe(0);
       expect(calculateRetryDelay(1, err, customDelay)).toBe(500);
       expect(calculateRetryDelay(2, err, customDelay)).toBe(1000);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // cacheTime / queryConfigMap registration
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("cacheTime / queryConfigMap registration", () => {
+    it("should register queryConfig for each page key when resolvedConfig is provided", async () => {
+      const getKey: SWRInfiniteKeyLoader<string, string> = (pageIndex) => {
+        return `/api/items?page=${pageIndex}`;
+      };
+
+      const fetcher = async (ctx: FetcherCtx<string>) => `data-${ctx.rawKey}`;
+
+      const controller = new AbortController();
+
+      const mockConfig = {
+        enabled: true,
+        eagerness: "visible" as const,
+        staleTime: 30_000,
+        cacheTime: 120_000, // custom cacheTime
+        dedupingInterval: 5_000,
+        revalidateOn: [] as ("focus" | "reconnect" | "interval")[],
+        refreshInterval: 0,
+        retry: 3,
+        retryInterval: 1000,
+        timeout: 30_000,
+        keepPreviousData: false,
+      } satisfies ResolvedQueryConfig;
+
+      await fetchAllPages<string, string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 2,
+        revalidateAll: false,
+        staleTime: 30_000,
+        signal: controller.signal,
+        resolvedConfig: mockConfig,
+      });
+
+      // GC should use our custom cacheTime (120s), not the default (300s)
+      expect(store.getCacheTime(hashKey("/api/items?page=0"))).toBe(120_000);
+      expect(store.getCacheTime(hashKey("/api/items?page=1"))).toBe(120_000);
+    });
+
+    it("should fall back to default cacheTime when resolvedConfig is not provided", async () => {
+      const getKey: SWRInfiniteKeyLoader<string, string> = (pageIndex) => {
+        return `/api/no-config?page=${pageIndex}`;
+      };
+
+      const fetcher = async (ctx: FetcherCtx<string>) => `data-${ctx.rawKey}`;
+      const controller = new AbortController();
+
+      await fetchAllPages<string, string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 1,
+        revalidateAll: false,
+        staleTime: 30_000,
+        signal: controller.signal,
+        // no resolvedConfig
+      });
+
+      // Should fall back to default 300_000
+      expect(store.getCacheTime(hashKey("/api/no-config?page=0"))).toBe(300_000);
     });
   });
 

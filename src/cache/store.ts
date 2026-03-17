@@ -85,9 +85,11 @@ export interface CacheStoreApi {
   readonly isOnline: boolean;
   setOnline(online: boolean): void;
 
-  // Observer Count (for GC)
+  // Observer Count / Config (for GC)
   getObserverCount(hashedKey: HashedKey): number;
   getCacheTime(hashedKey: HashedKey): number;
+  /** Register cache config for a key (used by useSWRInfinite for GC/cacheTime awareness). */
+  registerCacheConfig(hashedKey: HashedKey, opts: ResolvedQueryConfig): void;
 
   // Debug / Export / Import
   getDebugSnapshot(): DebugSnapshot;
@@ -476,6 +478,12 @@ function createCacheStore(): CacheStoreApi {
     getCacheTime(hashedKey: HashedKey): number {
       const cfg = state.queryConfigMap.get(hashedKey);
       return cfg?.cacheTime ?? 300000; // Default: 5 minutes
+    },
+
+    registerCacheConfig(hashedKey: HashedKey, opts: ResolvedQueryConfig): void {
+      if (!state.queryConfigMap.has(hashedKey)) {
+        state.queryConfigMap.set(hashedKey, opts);
+      }
     },
 
     // ═══════════════════════════════════════════════════════════════

@@ -4,6 +4,7 @@ import type {
   SWRInfiniteKeyLoader,
   FetcherCtx,
   SWRError,
+  ResolvedQueryConfig,
 } from "../types/index.ts";
 import { hashKey } from "../utils/hash.ts";
 import { store } from "../cache/store.ts";
@@ -159,6 +160,9 @@ export interface FetchPagesContext<Data, K extends ValidKey> {
   signal: AbortSignal;
   /** Per-page retry config. When omitted, no retry is performed. */
   retryConfig?: PageRetryConfig;
+  /** Resolved query config for GC cacheTime registration. When provided,
+   *  each page key is registered in queryConfigMap so GC respects cacheTime. */
+  resolvedConfig?: ResolvedQueryConfig;
 }
 
 export interface FetchPagesResult<Data, K extends ValidKey> {
@@ -175,7 +179,7 @@ export interface FetchPagesResult<Data, K extends ValidKey> {
 export async function fetchAllPages<Data, K extends ValidKey>(
   ctx: FetchPagesContext<Data, K>,
 ): Promise<FetchPagesResult<Data, K>> {
-  const { getKeyFn, fetcherFn, size, revalidateAll, staleTime, signal, retryConfig } = ctx;
+  const { getKeyFn, fetcherFn, size, revalidateAll, staleTime, signal, retryConfig, resolvedConfig } = ctx;
   const pages: Data[] = [];
   const pageKeys: K[] = [];
   let reachedEnd = false;
@@ -217,7 +221,10 @@ export async function fetchAllPages<Data, K extends ValidKey>(
 
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 
-    // Cache the page individually
+    // Cache the page individually + register config for GC cacheTime awareness
+    if (resolvedConfig) {
+      store.registerCacheConfig(hashed, resolvedConfig as ResolvedQueryConfig);
+    }
     store.setCache(hashed, {
       data,
       timestamp: Date.now(),

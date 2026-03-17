@@ -4,9 +4,11 @@ import type {
   ValidKey,
   HashedKey,
   Fetcher,
+  SWRError,
   SWRInfiniteOptions,
   SWRInfiniteResponse,
   SWRInfiniteKeyLoader,
+  SWRConfig,
 } from "../types/index.ts";
 import { SWRConfigContext } from "../provider/swr-provider.tsx";
 import { resolveOptions } from "../utils/resolve-options.ts";
@@ -15,16 +17,51 @@ import { mapEagerness } from "./helpers.ts";
 import { store } from "../cache/store.ts";
 import { toSWRError } from "../utils/error.ts";
 import { isContextNotFoundError } from "../utils/context-error.ts";
-import { isDev } from "../utils/env.ts";
-import { generateId } from "../utils/env.ts";
+import { isDev, generateId } from "../utils/env.ts";
 import { initEventManager } from "../cache/event-manager.ts";
 import { timerCoordinator } from "../cache/timer-coordinator.ts";
 import { fetchAllPages } from "./infinite-helpers.ts";
-import type { PageRetryConfig } from "./infinite-helpers.ts";
+import type { PageRetryConfig, FetchPagesResult } from "./infinite-helpers.ts";
 
 // Re-export helpers for public API consumers
 export { resolvePageKeys, checkIsReachingEnd, fetchAllPages, fetchPageWithRetry, calculateRetryDelay } from "./infinite-helpers.ts";
 export type { FetchPagesContext, FetchPagesResult, PageRetryConfig } from "./infinite-helpers.ts";
+
+// ═══════════════════════════════════════════════════════════════
+// Callback helpers (shared between doFetch, setSize$, mutate$)
+// ═══════════════════════════════════════════════════════════════
+
+async function invokeOnSuccess<Data, K extends ValidKey>(
+  options: SWRInfiniteOptions<Data> | undefined,
+  getKeyFn: SWRInfiniteKeyLoader<Data, K>,
+  pages: Data[],
+): Promise<void> {
+  if (!options?.onSuccess$) return;
+  const onSuccess = await options.onSuccess$.resolve();
+  const firstKey = getKeyFn(0, null);
+  if (firstKey !== null) {
+    onSuccess(pages, firstKey);
+  }
+}
+
+async function invokeOnError<Data, K extends ValidKey>(
+  options: SWRInfiniteOptions<Data> | undefined,
+  providerConfig: SWRConfig | undefined,
+  getKeyFn: SWRInfiniteKeyLoader<Data, K>,
+  swrError: SWRError,
+): Promise<void> {
+  const firstKey = getKeyFn(0, null);
+  if (firstKey === null) return;
+
+  if (options?.onError$) {
+    const onError = await options.onError$.resolve();
+    onError(swrError, firstKey);
+  }
+  if (providerConfig?.onErrorGlobal$) {
+    const onErrorGlobal = await providerConfig.onErrorGlobal$.resolve();
+    onErrorGlobal(swrError, firstKey);
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // useSWRInfinite hook
@@ -41,7 +78,8 @@ export type { FetchPagesContext, FetchPagesResult, PageRetryConfig } from "./inf
  * - per-attempt timeout
  * - focus/reconnect revalidation
  * - refreshInterval via timerCoordinator
- * - onErrorGlobal$ from SWRProvider
+ * - onSuccess$/onError$/onErrorGlobal$ callbacks on all fetch paths
+ * - cacheTime registered per page key for GC awareness
  */
 export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   getKey: QRL<SWRInfiniteKeyLoader<Data, K>>,
@@ -49,7 +87,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   options?: SWRInfiniteOptions<Data>,
 ): SWRInfiniteResponse<Data> {
   // ─── Resolve config ───
-  let providerConfig: import("../types/index.ts").SWRConfig | undefined;
+  let providerConfig: SWRConfig | undefined;
   try {
     providerConfig = useContext(SWRConfigContext);
   } catch (e) {
@@ -59,7 +97,21 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     }
   }
 
-  const resolved = resolveOptions(providerConfig, options);
+  // Pass only CommonSWROptions fields to resolveOptions.
+  // SWRInfiniteOptions.onSuccess$/onError$ have different signatures (Data[] vs Data)
+  // and are handled separately in executeFetch.
+  const resolved = resolveOptions(providerConfig, options ? {
+    freshness: options.freshness,
+    staleTime: options.staleTime,
+    cacheTime: options.cacheTime,
+    revalidateOn: options.revalidateOn,
+    refreshInterval: options.refreshInterval,
+    dedupingInterval: options.dedupingInterval,
+    retry: options.retry,
+    retryInterval: options.retryInterval,
+    timeout: options.timeout,
+    eagerness: options.eagerness,
+  } : undefined);
   const infiniteOpts = {
     initialSize: options?.initialSize ?? 1,
     revalidateAll: options?.revalidateAll ?? false,
@@ -87,7 +139,6 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   });
 
   // Internal mutable ref for tracking state across QRL boundaries.
-  // Stored in useStore so it survives Qwik serialization.
   const _internal = useStore<{
     currentSize: number;
     isFetching: boolean;
@@ -103,6 +154,64 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     fetchGeneration: 0,
     pageKeyHashes: [],
   });
+
+  // ─── Shared fetch logic ───
+  // Handles state transitions, fetch, callbacks, and generation guard.
+  // Used by doFetch (lifecycle), setSize$, and mutate$ revalidation.
+
+  async function executeFetch(
+    getKeyFn: SWRInfiniteKeyLoader<Data, K>,
+    fetcherFn: (ctx: import("../types/index.ts").FetcherCtx<K>) => Data | Promise<Data>,
+    size: number,
+    revalidateAll: boolean,
+    signal: AbortSignal,
+    generation: number,
+  ): Promise<FetchPagesResult<Data, K> | null> {
+    try {
+      const result = await fetchAllPages<Data, K>({
+        getKeyFn,
+        fetcherFn,
+        size,
+        revalidateAll,
+        staleTime: resolved.staleTime,
+        signal,
+        retryConfig,
+        resolvedConfig: resolved,
+      });
+
+      // Guard: only update state if this fetch is still the latest
+      if (generation !== _internal.fetchGeneration) return null;
+
+      state.data = result.pages;
+      state.error = undefined;
+      state.isReachingEnd = result.reachedEnd;
+      _internal.pageKeyHashes = result.pageKeys.map(hashKey);
+
+      // onSuccess callback
+      await invokeOnSuccess(options, getKeyFn, result.pages);
+
+      return result;
+    } catch (err) {
+      if (generation !== _internal.fetchGeneration) return null;
+      if (err instanceof DOMException && err.name === "AbortError") return null;
+
+      const swrError = toSWRError(err);
+      state.error = swrError;
+
+      // onError + onErrorGlobal$ callbacks
+      await invokeOnError(options, providerConfig, getKeyFn, swrError);
+
+      return null;
+    } finally {
+      if (generation === _internal.fetchGeneration) {
+        state.isLoading = false;
+        state.isLoadingMore = false;
+        state.isValidating = false;
+        state.isRefreshing = false;
+        _internal.isFetching = false;
+      }
+    }
+  }
 
   // ─── Main lifecycle ───
   useVisibleTask$(
@@ -124,7 +233,6 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
         _internal.isFetching = true;
 
         const hasExistingData = state.data != null && state.data.length > 0;
-
         if (!hasExistingData) {
           state.isLoading = true;
         } else if (size > (state.data?.length ?? 0)) {
@@ -134,68 +242,9 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
         }
         state.isValidating = true;
 
-        try {
-          const result = await fetchAllPages<Data, K>({
-            getKeyFn,
-            fetcherFn,
-            size,
-            revalidateAll,
-            staleTime: resolved.staleTime,
-            signal: abortController.signal,
-            retryConfig,
-          });
-
-          // Guard: only update state if this fetch is still the latest
-          if (generation !== _internal.fetchGeneration) return;
-
-          state.data = result.pages;
-          state.error = undefined;
-          state.isReachingEnd = result.reachedEnd;
-          _internal.currentSize = size;
-          _internal.pageKeyHashes = result.pageKeys.map(hashKey);
-          state.size = size;
-
-          // onSuccess callback
-          if (options?.onSuccess$) {
-            const onSuccess = await options.onSuccess$.resolve();
-            const firstKey = getKeyFn(0, null);
-            if (firstKey !== null) {
-              onSuccess(result.pages, firstKey);
-            }
-          }
-        } catch (err) {
-          if (generation !== _internal.fetchGeneration) return;
-          if (err instanceof DOMException && err.name === "AbortError") return;
-
-          const swrError = toSWRError(err);
-          state.error = swrError;
-
-          // onError callback (hook-level)
-          if (options?.onError$) {
-            const onError = await options.onError$.resolve();
-            const firstKey = getKeyFn(0, null);
-            if (firstKey !== null) {
-              onError(swrError, firstKey);
-            }
-          }
-
-          // onErrorGlobal$ (provider-level)
-          if (providerConfig?.onErrorGlobal$) {
-            const onErrorGlobal = await providerConfig.onErrorGlobal$.resolve();
-            const firstKey = getKeyFn(0, null);
-            if (firstKey !== null) {
-              onErrorGlobal(swrError, firstKey);
-            }
-          }
-        } finally {
-          if (generation === _internal.fetchGeneration) {
-            state.isLoading = false;
-            state.isLoadingMore = false;
-            state.isValidating = false;
-            state.isRefreshing = false;
-            _internal.isFetching = false;
-          }
-        }
+        await executeFetch(getKeyFn, fetcherFn, size, revalidateAll, abortController.signal, generation);
+        _internal.currentSize = size;
+        state.size = size;
       };
 
       // Initial fetch
@@ -236,7 +285,6 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     const getKeyFn = await getKey.resolve();
     const fetcherFn = await fetcher.resolve();
 
-    // Create a new abort controller for this fetch
     const controller = new AbortController();
     _internal.fetchGeneration++;
     const generation = _internal.fetchGeneration;
@@ -251,35 +299,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     }
     state.isValidating = true;
 
-    try {
-      const result = await fetchAllPages<Data, K>({
-        getKeyFn,
-        fetcherFn,
-        size: newSize,
-        revalidateAll: false,
-        staleTime: resolved.staleTime,
-        signal: controller.signal,
-        retryConfig,
-      });
-
-      if (generation !== _internal.fetchGeneration) return;
-
-      state.data = result.pages;
-      state.error = undefined;
-      state.isReachingEnd = result.reachedEnd;
-      _internal.pageKeyHashes = result.pageKeys.map(hashKey);
-    } catch (err) {
-      if (generation !== _internal.fetchGeneration) return;
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      state.error = toSWRError(err);
-    } finally {
-      if (generation === _internal.fetchGeneration) {
-        state.isLoading = false;
-        state.isLoadingMore = false;
-        state.isValidating = false;
-        state.isRefreshing = false;
-      }
-    }
+    await executeFetch(getKeyFn, fetcherFn, newSize, false, controller.signal, generation);
   });
 
   // ─── mutate$ ───
@@ -294,11 +314,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
 
       state.data = resolvedData;
 
-      // Write to cache using STABLE page keys from the last fetch,
-      // NOT re-derived keys from the (possibly mutated) data.
-      // This prevents cursor-based pagination key corruption where
-      // optimistic updates could change cursor values in page data,
-      // causing page N+1's data to be written under a wrong key.
+      // Write to cache using STABLE page keys from the last fetch.
       const stableHashes = _internal.pageKeyHashes;
       for (let i = 0; i < resolvedData.length; i++) {
         if (i < stableHashes.length) {
@@ -307,8 +323,6 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
             timestamp: Date.now(),
           });
         }
-        // Pages beyond the known key range are not cached.
-        // They will be fetched and cached properly on next revalidation.
       }
     }
 
@@ -324,33 +338,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
       state.isRefreshing = true;
       state.isValidating = true;
 
-      try {
-        const result = await fetchAllPages<Data, K>({
-          getKeyFn,
-          fetcherFn,
-          size: _internal.currentSize,
-          revalidateAll: true,
-          staleTime: resolved.staleTime,
-          signal: controller.signal,
-          retryConfig,
-        });
-
-        if (generation !== _internal.fetchGeneration) return;
-
-        state.data = result.pages;
-        state.error = undefined;
-        state.isReachingEnd = result.reachedEnd;
-        _internal.pageKeyHashes = result.pageKeys.map(hashKey);
-      } catch (err) {
-        if (generation !== _internal.fetchGeneration) return;
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        state.error = toSWRError(err);
-      } finally {
-        if (generation === _internal.fetchGeneration) {
-          state.isRefreshing = false;
-          state.isValidating = false;
-        }
-      }
+      await executeFetch(getKeyFn, fetcherFn, _internal.currentSize, true, controller.signal, generation);
     }
   });
 
