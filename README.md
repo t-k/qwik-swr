@@ -307,6 +307,109 @@ const result = await mutateAsync$({ title: "New Todo" });
 
 ---
 
+### `useSWRInfinite(getKey$, fetcher$, options?)`
+
+Infinite loading / pagination hook. Each page is cached individually and pages are fetched sequentially (because `getKey` receives the previous page's data to derive the next key).
+
+| Param      | Type                                              | Description                                                             |
+| ---------- | ------------------------------------------------- | ----------------------------------------------------------------------- |
+| `getKey$`  | `QRL<(pageIndex: number, prevData: Data \| null) => Key \| null>` | Key generator. Return `null` to stop loading. |
+| `fetcher$` | `QRL<(ctx: FetcherCtx) => Data \| Promise<Data>>` | QRL-wrapped fetcher function.                                           |
+| `options?` | `SWRInfiniteOptions<Data>`                        | Per-hook configuration (see below).                                     |
+
+#### `SWRInfiniteResponse<Data>`
+
+| Field           | Type                                                        | Description                                      |
+| --------------- | ----------------------------------------------------------- | ------------------------------------------------ |
+| `data`          | `Data[] \| undefined`                                       | All loaded pages                                 |
+| `error`         | `SWRError \| undefined`                                     | Latest error                                     |
+| `size`          | `number`                                                    | Current number of pages                          |
+| `setSize$`      | `QRL<(size \| (current) => size) => void>`                  | Set number of pages (triggers fetch)             |
+| `mutate$`       | `QRL<(data?, options?) => Promise<void>>`                   | Update page data with optional revalidation      |
+| `isLoading`     | `boolean`                                                   | Loading initial data (no data yet)               |
+| `isLoadingMore` | `boolean`                                                   | Loading additional pages (data already exists)   |
+| `isValidating`  | `boolean`                                                   | Any fetch in progress                            |
+| `isReachingEnd` | `boolean`                                                   | `getKey` returned `null` for the next page       |
+| `isRefreshing`  | `boolean`                                                   | Refreshing existing pages                        |
+
+#### `SWRInfiniteOptions<Data>`
+
+Extends `CommonSWROptions` (freshness, staleTime, revalidateOn, retry, etc.) with:
+
+| Option                 | Type      | Default | Description                                               |
+| ---------------------- | --------- | ------- | --------------------------------------------------------- |
+| `initialSize`          | `number`  | `1`     | Number of pages to load initially                         |
+| `revalidateAll`        | `boolean` | `false` | Revalidate all pages on event triggers (not just first)   |
+| `revalidateFirstPage`  | `boolean` | `true`  | Revalidate first page on focus/reconnect                  |
+| `persistSize`          | `boolean` | `false` | Keep page count when key changes                          |
+| `parallel`             | `boolean` | `false` | Fetch pages in parallel (only when keys are independent)  |
+| `onSuccess$`           | `QRL`     | --      | `(data: Data[], key) => void`                             |
+| `onError$`             | `QRL`     | --      | `(error: SWRError, key) => void`                          |
+
+#### Usage: Infinite Scroll
+
+```tsx
+import { component$, $ } from "@builder.io/qwik";
+import { useSWRInfinite } from "qwik-swr";
+
+type Page = { items: Item[]; nextCursor: string | null };
+
+export default component$(() => {
+  const { data, setSize$, isLoadingMore, isReachingEnd } = useSWRInfinite<Page>(
+    $((pageIndex, previousPageData) => {
+      if (pageIndex === 0) return "/api/items";
+      if (!previousPageData?.nextCursor) return null; // reached end
+      return `/api/items?cursor=${previousPageData.nextCursor}`;
+    }),
+    $(async (ctx) => {
+      const res = await fetch(ctx.rawKey, { signal: ctx.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }),
+  );
+
+  const allItems = data?.flatMap((page) => page.items) ?? [];
+
+  return (
+    <div>
+      {allItems.map((item) => (
+        <div key={item.id}>{item.name}</div>
+      ))}
+      {!isReachingEnd && (
+        <button
+          onClick$={() => setSize$((s) => s + 1)}
+          disabled={isLoadingMore}
+        >
+          {isLoadingMore ? "Loading..." : "Load More"}
+        </button>
+      )}
+    </div>
+  );
+});
+```
+
+#### Usage: Offset-based Pagination
+
+```tsx
+const PAGE_SIZE = 10;
+
+const { data, size, setSize$, isReachingEnd } = useSWRInfinite<Item[]>(
+  $((pageIndex) => `/api/items?offset=${pageIndex * PAGE_SIZE}&limit=${PAGE_SIZE}`),
+  $(async (ctx) => {
+    const res = await fetch(ctx.rawKey, { signal: ctx.signal });
+    return res.json();
+  }),
+);
+
+// Flatten all pages
+const allItems = data?.flat() ?? [];
+
+// Load more
+await setSize$((current) => current + 1);
+```
+
+---
+
 ### `useSubscription(key, subscriber$, options?)`
 
 Real-time data subscription with automatic reconnection (exponential backoff).

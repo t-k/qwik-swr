@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { store } from "../../src/cache/store.ts";
 import { hashKey } from "../../src/utils/hash.ts";
 import {
