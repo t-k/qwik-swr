@@ -6,7 +6,7 @@ import type {
   Fetcher,
   FetcherCtx,
   SWRError,
-  ResolvedSWROptions,
+  ResolvedQueryConfig,
   SWRInfiniteOptions,
   SWRInfiniteResponse,
   SWRInfiniteResponseWithData,
@@ -89,7 +89,7 @@ interface InfiniteInternal {
 interface InfiniteContext<Data> {
   state: SWRInfiniteResponse<Data>;
   _internal: InfiniteInternal;
-  resolved: ResolvedSWROptions<Data>;
+  resolved: ResolvedQueryConfig<Data>;
   retryConfig: PageRetryConfig;
   options: SWRInfiniteOptions<Data> | undefined;
   providerConfig: SWRConfig | undefined;
@@ -137,7 +137,7 @@ async function executeFetch<Data, K extends ValidKey>(
       staleTime: resolved.staleTime,
       signal,
       retryConfig,
-      resolvedConfig: resolved,
+      resolvedConfig: resolved as ResolvedQueryConfig,
     });
 
     // Guard: only update state if this fetch is still the latest
@@ -237,7 +237,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   // Pass only CommonSWROptions fields to resolveOptions.
   // SWRInfiniteOptions.onSuccess$/onError$ have different signatures (Data[] vs Data)
   // and are handled separately in executeFetch.
-  const resolved = resolveOptions(providerConfig, options ? {
+  const resolved = resolveOptions<Data>(providerConfig, options ? {
     freshness: options.freshness,
     staleTime: options.staleTime,
     cacheTime: options.cacheTime,
@@ -335,7 +335,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
           if (key === null) break;
           pageKeys.push(key);
           const hashed = hashKey(key);
-          store.registerCacheConfig(hashed, resolved);
+          store.registerCacheConfig(hashed, resolved as ResolvedQueryConfig);
           store.setCache(hashed, { data: fallback[i], timestamp: Date.now() });
         }
         _internal.pageKeyHashes = pageKeys.map(hashKey);
