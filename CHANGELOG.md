@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.3.1] - 2026-03-17
+
+### Added
+
+- `fallbackData` option for `useSWRInfinite` -- pre-load pages from SSR (e.g. `routeLoader$`)
+  - `state.data` is initialized immediately (no loading spinner)
+  - `initialSize` defaults to `fallbackData.length` when not explicitly set
+  - Each page is seeded into individual cache entries with cacheTime registration
+  - Background revalidation still runs (stale-while-revalidate)
+
+### Fixed
+
+- `setSize$` with decreased size now trims data in-place without network request
+- `setSize$` / `mutate$` now share abort generation with lifecycle fetch (prevents stale overwrites)
+- `mutate$` revalidation respects `revalidateAll` option instead of hardcoded `true`
+- `doFetch` updates `_internal.currentSize` before `executeFetch` (correct on error)
+- `onSuccess$` / `onError$` / `onErrorGlobal$` now fire on all fetch paths (setSize$, mutate$)
+- `cacheTime` registered per page key via `store.registerCacheConfig()` for proper GC
+- `dedupingInterval` uses store's shared `cooldownMap` for cross-instance dedup
+  - Cooldown starts on both success and error (matches `useSWR` behavior)
+- Removed unimplemented options from type: `parallel`, `persistSize`, `revalidateFirstPage`
+
 ## [0.3.0] - 2026-03-17
 
 ### Added
