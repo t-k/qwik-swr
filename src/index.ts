@@ -22,6 +22,7 @@ export type {
   SWROptions,
   ResolvedSWROptions,
   SWRResponse,
+  SWRResponseWithData,
   SWRConfig,
   // Phase 2: Mutation
   MutationStatus,
@@ -49,6 +50,7 @@ export type {
   SWRInfiniteKeyLoader,
   SWRInfiniteOptions,
   SWRInfiniteResponse,
+  SWRInfiniteResponseWithData,
 } from "./types/index.ts";
 
 // Constants

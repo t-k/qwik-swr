@@ -180,6 +180,22 @@ export interface SWRResponse<Data> {
   >;
 }
 
+/**
+ * SWR response when fallbackData is provided.
+ * `data` is guaranteed to be `Data` (never undefined) since fallbackData
+ * ensures an initial value exists at all times.
+ * `mutate$` updater also receives `Data` (not `Data | undefined`).
+ */
+export interface SWRResponseWithData<Data> extends Omit<SWRResponse<Data>, "data" | "mutate$"> {
+  data: Data;
+  mutate$: QRL<
+    (
+      data: Data | ((current: Data) => Data),
+      options?: { revalidate?: boolean },
+    ) => Promise<void>
+  >;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Global Config
 // ═══════════════════════════════════════════════════════════════
@@ -507,4 +523,14 @@ export interface SWRInfiniteResponse<Data> {
   isReachingEnd: boolean;
   /** Refreshing existing pages */
   isRefreshing: boolean;
+}
+
+/**
+ * Infinite response when fallbackData is provided.
+ * `data` is guaranteed to be `Data[]` (never undefined).
+ * `mutate$` updater also receives `Data[]` (not `Data[] | undefined`).
+ */
+export interface SWRInfiniteResponseWithData<Data> extends Omit<SWRInfiniteResponse<Data>, "data" | "mutate$"> {
+  data: Data[];
+  mutate$: QRL<(data?: Data[] | ((current: Data[]) => Data[]), options?: { revalidate?: boolean }) => Promise<void>>;
 }

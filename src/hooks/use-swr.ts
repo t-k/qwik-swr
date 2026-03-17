@@ -6,6 +6,7 @@ import type {
   Fetcher,
   SWROptions,
   SWRResponse,
+  SWRResponseWithData,
   MaybeSignalSWRKey,
 } from "../types/index.ts";
 import { SWRConfigContext } from "../provider/swr-provider.tsx";
@@ -24,7 +25,16 @@ import { isDisabledKey } from "../utils/resolve-key.ts";
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Overload 1: Valid key with type inference
+ * Overload 1a: Valid key + fallbackData → data is guaranteed non-undefined
+ */
+export function useSWR<Data, K extends ValidKey>(
+  key: K,
+  fetcher: QRL<Fetcher<Data, K>>,
+  options: SWROptions<Data> & { fallbackData: Data },
+): SWRResponseWithData<Data>;
+
+/**
+ * Overload 1b: Valid key with type inference
  */
 export function useSWR<Data, K extends ValidKey>(
   key: K,
@@ -39,14 +49,28 @@ export function useSWR<Data>(
   options?: SWROptions<Data>,
 ): SWRResponse<Data>;
 
-/** Overload 3: Runtime key (conditional fetch) */
+/** Overload 3a: Runtime key + fallbackData → data is guaranteed non-undefined */
+export function useSWR<Data, K extends ValidKey = ValidKey>(
+  key: SWRKey,
+  fetcher: QRL<Fetcher<Data, K>>,
+  options: SWROptions<Data> & { fallbackData: Data },
+): SWRResponseWithData<Data>;
+
+/** Overload 3b: Runtime key (conditional fetch) */
 export function useSWR<Data, K extends ValidKey = ValidKey>(
   key: SWRKey,
   fetcher: QRL<Fetcher<Data, K>>,
   options?: SWROptions<Data>,
 ): SWRResponse<Data>;
 
-/** Overload 4: Signal key (reactive key changes) */
+/** Overload 4a: Signal key + fallbackData → data is guaranteed non-undefined */
+export function useSWR<Data, K extends ValidKey = ValidKey>(
+  key: Signal<SWRKey>,
+  fetcher: QRL<Fetcher<Data, K>>,
+  options: SWROptions<Data> & { fallbackData: Data },
+): SWRResponseWithData<Data>;
+
+/** Overload 4b: Signal key (reactive key changes) */
 export function useSWR<Data, K extends ValidKey = ValidKey>(
   key: Signal<SWRKey>,
   fetcher: QRL<Fetcher<Data, K>>,

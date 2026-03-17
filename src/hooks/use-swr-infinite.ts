@@ -7,6 +7,7 @@ import type {
   SWRError,
   SWRInfiniteOptions,
   SWRInfiniteResponse,
+  SWRInfiniteResponseWithData,
   SWRInfiniteKeyLoader,
   SWRConfig,
 } from "../types/index.ts";
@@ -82,6 +83,21 @@ async function invokeOnError<Data, K extends ValidKey>(
  * - cacheTime registered per page key for GC awareness
  * - dedupingInterval via store's shared cooldownMap (cross-instance)
  */
+/** Overload: fallbackData provided → data is guaranteed non-undefined */
+export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
+  getKey: QRL<SWRInfiniteKeyLoader<Data, K>>,
+  fetcher: QRL<Fetcher<Data, K>>,
+  options: SWRInfiniteOptions<Data> & { fallbackData: Data[] },
+): SWRInfiniteResponseWithData<Data>;
+
+/** Overload: no fallbackData → data may be undefined */
+export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
+  getKey: QRL<SWRInfiniteKeyLoader<Data, K>>,
+  fetcher: QRL<Fetcher<Data, K>>,
+  options?: SWRInfiniteOptions<Data>,
+): SWRInfiniteResponse<Data>;
+
+/** Implementation */
 export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   getKey: QRL<SWRInfiniteKeyLoader<Data, K>>,
   fetcher: QRL<Fetcher<Data, K>>,
