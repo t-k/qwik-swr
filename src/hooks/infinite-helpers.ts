@@ -1,10 +1,13 @@
 import type {
   ValidKey,
+  HashedKey,
   SWRInfiniteKeyLoader,
   FetcherCtx,
+  SWRError,
 } from "../types/index.ts";
 import { hashKey } from "../utils/hash.ts";
 import { store } from "../cache/store.ts";
+import { toSWRError } from "../utils/error.ts";
 
 // ═══════════════════════════════════════════════════════════════
 // Pure helpers for useSWRInfinite (testable without Qwik runtime)
@@ -41,6 +44,109 @@ export function checkIsReachingEnd<Data, K extends ValidKey>(
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Retry helpers
+// ═══════════════════════════════════════════════════════════════
+
+/** Calculate exponential backoff delay for retry. */
+export function calculateRetryDelay(
+  retryCount: number,
+  error: SWRError,
+  retryInterval: number | ((retryCount: number, error: SWRError) => number),
+): number {
+  if (typeof retryInterval === "function") {
+    return retryInterval(retryCount, error);
+  }
+  return retryInterval * 2 ** retryCount;
+}
+
+/** Per-page retry configuration. */
+export interface PageRetryConfig {
+  retry: number;
+  retryInterval: number | ((retryCount: number, error: SWRError) => number);
+  timeout: number;
+}
+
+/**
+ * Fetch a single page with retry and timeout.
+ * Implements the same retry semantics as store-fetch.ts startFetch.
+ */
+export async function fetchPageWithRetry<Data, K extends ValidKey>(
+  fetcherFn: (ctx: FetcherCtx<K>) => Data | Promise<Data>,
+  key: K,
+  hashed: HashedKey,
+  signal: AbortSignal,
+  config: PageRetryConfig,
+  retryCount = 0,
+): Promise<Data> {
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+  // Per-attempt timeout via AbortController chaining
+  const timeoutController = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  if (config.timeout > 0) {
+    timeoutId = setTimeout(() => timeoutController.abort(), config.timeout);
+  }
+  // Propagate parent signal abort to timeout controller
+  const onParentAbort = () => timeoutController.abort();
+  signal.addEventListener("abort", onParentAbort, { once: true });
+
+  const ctx: FetcherCtx<K> = {
+    rawKey: key,
+    hashedKey: hashed,
+    signal: timeoutController.signal,
+  };
+
+  try {
+    const result = fetcherFn(ctx);
+    const data = await Promise.resolve(result);
+
+    if (timeoutId !== null) clearTimeout(timeoutId);
+    signal.removeEventListener("abort", onParentAbort);
+
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    return data;
+  } catch (err) {
+    if (timeoutId !== null) clearTimeout(timeoutId);
+    signal.removeEventListener("abort", onParentAbort);
+
+    // Don't retry abort (parent signal)
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    // Timeout from our own controller = classify as timeout, but still retryable
+    if (timeoutController.signal.aborted && !signal.aborted) {
+      const timeoutErr = toSWRError(new DOMException("Timeout", "TimeoutError"), retryCount);
+      if (retryCount < config.retry) {
+        const delay = calculateRetryDelay(retryCount, timeoutErr, config.retryInterval);
+        await new Promise<void>((resolve, reject) => {
+          setTimeout(() => {
+            if (signal.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
+            resolve();
+          }, delay);
+        });
+        return fetchPageWithRetry(fetcherFn, key, hashed, signal, config, retryCount + 1);
+      }
+      throw timeoutErr;
+    }
+
+    // Retry on other errors
+    if (retryCount < config.retry) {
+      const swrErr = toSWRError(err, retryCount);
+      const delay = calculateRetryDelay(retryCount, swrErr, config.retryInterval);
+      await new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          if (signal.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
+          resolve();
+        }, delay);
+      });
+      return fetchPageWithRetry(fetcherFn, key, hashed, signal, config, retryCount + 1);
+    }
+
+    throw toSWRError(err, retryCount);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Core fetch logic
 // ═══════════════════════════════════════════════════════════════
 
@@ -51,17 +157,27 @@ export interface FetchPagesContext<Data, K extends ValidKey> {
   revalidateAll: boolean;
   staleTime: number;
   signal: AbortSignal;
+  /** Per-page retry config. When omitted, no retry is performed. */
+  retryConfig?: PageRetryConfig;
+}
+
+export interface FetchPagesResult<Data, K extends ValidKey> {
+  pages: Data[];
+  reachedEnd: boolean;
+  /** Keys used for each page (stable reference for cache writes). */
+  pageKeys: K[];
 }
 
 /**
  * Fetch all pages sequentially. Each page's key depends on the previous page's data.
- * Returns the fetched pages and whether we've reached the end.
+ * Returns the fetched pages, their keys, and whether we've reached the end.
  */
 export async function fetchAllPages<Data, K extends ValidKey>(
   ctx: FetchPagesContext<Data, K>,
-): Promise<{ pages: Data[]; reachedEnd: boolean }> {
-  const { getKeyFn, fetcherFn, size, revalidateAll, staleTime, signal } = ctx;
+): Promise<FetchPagesResult<Data, K>> {
+  const { getKeyFn, fetcherFn, size, revalidateAll, staleTime, signal, retryConfig } = ctx;
   const pages: Data[] = [];
+  const pageKeys: K[] = [];
   let reachedEnd = false;
 
   for (let i = 0; i < size; i++) {
@@ -84,19 +200,20 @@ export async function fetchAllPages<Data, K extends ValidKey>(
         const age = Date.now() - cached.timestamp;
         if (age < staleTime) {
           pages.push(cached.data);
+          pageKeys.push(key);
           continue;
         }
       }
     }
 
-    // Fetch this page
-    const fetchCtx: FetcherCtx<K> = {
-      rawKey: key,
-      hashedKey: hashed,
-      signal,
-    };
-
-    const data = await fetcherFn(fetchCtx);
+    // Fetch this page (with or without retry)
+    let data: Data;
+    if (retryConfig) {
+      data = await fetchPageWithRetry(fetcherFn, key, hashed, signal, retryConfig);
+    } else {
+      const fetchCtx: FetcherCtx<K> = { rawKey: key, hashedKey: hashed, signal };
+      data = await Promise.resolve(fetcherFn(fetchCtx));
+    }
 
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
 
@@ -107,6 +224,7 @@ export async function fetchAllPages<Data, K extends ValidKey>(
     });
 
     pages.push(data);
+    pageKeys.push(key);
   }
 
   // Check if next page exists
@@ -114,5 +232,5 @@ export async function fetchAllPages<Data, K extends ValidKey>(
     reachedEnd = checkIsReachingEnd(getKeyFn, pages);
   }
 
-  return { pages, reachedEnd };
+  return { pages, reachedEnd, pageKeys };
 }

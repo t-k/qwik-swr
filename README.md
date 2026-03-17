@@ -334,7 +334,9 @@ Infinite loading / pagination hook. Each page is cached individually and pages a
 
 #### `SWRInfiniteOptions<Data>`
 
-Extends `CommonSWROptions` (freshness, staleTime, revalidateOn, retry, etc.) with:
+Extends `CommonSWROptions` (freshness, staleTime, revalidateOn, retry, retryInterval, timeout, refreshInterval, etc.) with:
+
+Inherited behavior from `useSWR`: retry with exponential backoff (per page), per-attempt timeout, focus/reconnect revalidation, refreshInterval via timer coordination, and `onErrorGlobal$` from `SWRProvider`.
 
 | Option                 | Type      | Default | Description                                               |
 | ---------------------- | --------- | ------- | --------------------------------------------------------- |

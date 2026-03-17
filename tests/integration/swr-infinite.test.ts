@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { store } from "../../src/cache/store.ts";
 import { hashKey } from "../../src/utils/hash.ts";
-import { fetchAllPages } from "../../src/hooks/infinite-helpers.ts";
-import type { SWRInfiniteKeyLoader, FetcherCtx } from "../../src/types/index.ts";
+import { fetchAllPages, fetchPageWithRetry, calculateRetryDelay } from "../../src/hooks/infinite-helpers.ts";
+import type { SWRInfiniteKeyLoader, FetcherCtx, SWRError } from "../../src/types/index.ts";
 
 describe("swr-infinite integration tests", () => {
   beforeEach(() => {
@@ -51,6 +51,29 @@ describe("swr-infinite integration tests", () => {
       expect(store.getCache(hashKey("/api/items?page=2"))?.data).toEqual([21, 22]);
     });
 
+    it("should return stable pageKeys alongside pages", async () => {
+      const getKey: SWRInfiniteKeyLoader<string, string> = (pageIndex) => {
+        return `/api/items?page=${pageIndex}`;
+      };
+
+      const fetcher = async (ctx: FetcherCtx<string>) => `data-${ctx.rawKey}`;
+
+      const controller = new AbortController();
+      const result = await fetchAllPages<string, string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 2,
+        revalidateAll: false,
+        staleTime: 30_000,
+        signal: controller.signal,
+      });
+
+      expect(result.pageKeys).toEqual([
+        "/api/items?page=0",
+        "/api/items?page=1",
+      ]);
+    });
+
     it("should stop fetching when getKey returns null", async () => {
       const fetchCount = { value: 0 };
 
@@ -75,6 +98,7 @@ describe("swr-infinite integration tests", () => {
       });
 
       expect(result.pages.length).toBe(2);
+      expect(result.pageKeys.length).toBe(2);
       expect(result.reachedEnd).toBe(true);
       expect(fetchCount.value).toBe(2);
     });
@@ -288,7 +312,7 @@ describe("swr-infinite integration tests", () => {
   // ═══════════════════════════════════════════════════════════════
 
   describe("error during page fetch", () => {
-    it("should throw error when a page fetch fails", async () => {
+    it("should throw error when a page fetch fails (no retry)", async () => {
       const getKey: SWRInfiniteKeyLoader<string, string> = (pageIndex) => {
         return `/api/items?page=${pageIndex}`;
       };
@@ -461,6 +485,58 @@ describe("swr-infinite integration tests", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
+  // Stable page keys for mutate$ (cursor corruption prevention)
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("stable page keys (cursor corruption prevention)", () => {
+    it("should return pageKeys from fetchAllPages for use in mutate$", async () => {
+      type Page = { items: string[]; nextCursor: string | null };
+
+      const getKey: SWRInfiniteKeyLoader<Page, string> = (pageIndex, prev) => {
+        if (pageIndex === 0) return "/api/items";
+        if (!prev?.nextCursor) return null;
+        return `/api/items?cursor=${prev.nextCursor}`;
+      };
+
+      const fetcher = async (ctx: FetcherCtx<string>): Promise<Page> => {
+        if (ctx.rawKey === "/api/items") {
+          return { items: ["a", "b"], nextCursor: "cursor-1" };
+        }
+        return { items: ["c", "d"], nextCursor: null };
+      };
+
+      const controller = new AbortController();
+      const result = await fetchAllPages<Page, string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 2,
+        revalidateAll: false,
+        staleTime: 30_000,
+        signal: controller.signal,
+      });
+
+      // pageKeys should reflect the keys used at fetch time
+      expect(result.pageKeys).toEqual(["/api/items", "/api/items?cursor=cursor-1"]);
+
+      // mutate$ should use these stable keys (not re-derived from mutated data)
+      // Simulate: optimistic update changes page 0's nextCursor
+      const stableHashes = result.pageKeys.map(hashKey);
+      const mutatedPage0: Page = { items: ["a", "b", "NEW"], nextCursor: "cursor-CHANGED" };
+
+      // Write using stable keys: page 1 stays under its original key
+      store.setCache(stableHashes[0], { data: mutatedPage0, timestamp: Date.now() });
+
+      // Page 1 data is still under the ORIGINAL key, not cursor-CHANGED
+      expect(store.getCache(hashKey("/api/items?cursor=cursor-1"))?.data).toEqual(
+        { items: ["c", "d"], nextCursor: null },
+      );
+
+      // No data under the wrong key
+      expect(store.getCache(hashKey("/api/items?cursor=cursor-CHANGED"))).toBeNull();
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
   // fetchAllPages with stale cache (staleTime expired)
   // ═══════════════════════════════════════════════════════════════
 
@@ -509,6 +585,164 @@ describe("swr-infinite integration tests", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
+  // Per-page retry with exponential backoff
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("per-page retry", () => {
+    it("should retry a failed page fetch with exponential backoff", async () => {
+      vi.useRealTimers(); // real timers for async retry tests
+
+      let attempts = 0;
+      const fetcher = async (_ctx: FetcherCtx<string>): Promise<string> => {
+        attempts++;
+        if (attempts <= 2) throw new Error(`Attempt ${attempts} failed`);
+        return "success";
+      };
+
+      const controller = new AbortController();
+      const result = await fetchPageWithRetry<string, string>(
+        fetcher,
+        "/api/items",
+        hashKey("/api/items"),
+        controller.signal,
+        { retry: 3, retryInterval: 1, timeout: 0 }, // 1ms delays for speed
+      );
+
+      expect(result).toBe("success");
+      expect(attempts).toBe(3);
+    });
+
+    it("should throw after all retries exhausted", async () => {
+      vi.useRealTimers();
+
+      let attempts = 0;
+      const fetcher = async (_ctx: FetcherCtx<string>): Promise<string> => {
+        attempts++;
+        throw new Error("Always fails");
+      };
+
+      const controller = new AbortController();
+
+      await expect(
+        fetchPageWithRetry<string, string>(
+          fetcher,
+          "/api/items",
+          hashKey("/api/items"),
+          controller.signal,
+          { retry: 2, retryInterval: 1, timeout: 0 },
+        ),
+      ).rejects.toThrow("Always fails");
+
+      expect(attempts).toBe(3); // 1 initial + 2 retries
+    });
+
+    it("should not retry when retry is 0", async () => {
+      vi.useRealTimers();
+
+      let attempts = 0;
+      const fetcher = async (_ctx: FetcherCtx<string>): Promise<string> => {
+        attempts++;
+        throw new Error("Fail");
+      };
+
+      const controller = new AbortController();
+
+      await expect(
+        fetchPageWithRetry<string, string>(
+          fetcher,
+          "/api/items",
+          hashKey("/api/items"),
+          controller.signal,
+          { retry: 0, retryInterval: 1, timeout: 0 },
+        ),
+      ).rejects.toThrow("Fail");
+
+      expect(attempts).toBe(1);
+    });
+
+    it("should abort retry when parent signal is aborted", async () => {
+      vi.useRealTimers();
+
+      let attempts = 0;
+      const fetcher = async (_ctx: FetcherCtx<string>): Promise<string> => {
+        attempts++;
+        throw new Error("Fail");
+      };
+
+      const controller = new AbortController();
+
+      const promise = fetchPageWithRetry<string, string>(
+        fetcher,
+        "/api/items",
+        hashKey("/api/items"),
+        controller.signal,
+        { retry: 3, retryInterval: 100, timeout: 0 },
+      );
+
+      // Give first attempt time to fail, then abort during delay
+      await new Promise(r => setTimeout(r, 10));
+      controller.abort();
+
+      await expect(promise).rejects.toThrow("Aborted");
+      expect(attempts).toBe(1);
+    });
+
+    it("should work with fetchAllPages when retryConfig is provided", async () => {
+      vi.useRealTimers();
+
+      let page1Attempts = 0;
+
+      const getKey: SWRInfiniteKeyLoader<string, string> = (pageIndex) => {
+        return `/api/items?page=${pageIndex}`;
+      };
+
+      const fetcher = async (ctx: FetcherCtx<string>): Promise<string> => {
+        if (ctx.rawKey.includes("page=1")) {
+          page1Attempts++;
+          if (page1Attempts <= 1) throw new Error("Page 1 transient failure");
+        }
+        return `data-${ctx.rawKey}`;
+      };
+
+      const controller = new AbortController();
+
+      const result = await fetchAllPages<string, string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 2,
+        revalidateAll: false,
+        staleTime: 30_000,
+        signal: controller.signal,
+        retryConfig: { retry: 2, retryInterval: 1, timeout: 0 },
+      });
+
+      expect(result.pages.length).toBe(2);
+      expect(page1Attempts).toBe(2); // 1 fail + 1 success
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // calculateRetryDelay
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("calculateRetryDelay", () => {
+    it("should calculate exponential backoff", () => {
+      const err = { type: "unknown", message: "err", retryCount: 0, timestamp: 0 } as SWRError;
+      expect(calculateRetryDelay(0, err, 1000)).toBe(1000);  // 1000 * 2^0
+      expect(calculateRetryDelay(1, err, 1000)).toBe(2000);  // 1000 * 2^1
+      expect(calculateRetryDelay(2, err, 1000)).toBe(4000);  // 1000 * 2^2
+    });
+
+    it("should support custom delay function", () => {
+      const err = { type: "unknown", message: "err", retryCount: 0, timestamp: 0 } as SWRError;
+      const customDelay = (count: number) => count * 500;
+      expect(calculateRetryDelay(0, err, customDelay)).toBe(0);
+      expect(calculateRetryDelay(1, err, customDelay)).toBe(500);
+      expect(calculateRetryDelay(2, err, customDelay)).toBe(1000);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
   // Cursor-based pagination pattern
   // ═══════════════════════════════════════════════════════════════
 
@@ -547,6 +781,13 @@ describe("swr-infinite integration tests", () => {
       expect(result.pages[1].items).toEqual(["c", "d"]);
       expect(result.pages[2].items).toEqual(["e"]);
       expect(result.reachedEnd).toBe(true); // nextCursor is null for page 2
+
+      // Verify stable keys for cursor-based pagination
+      expect(result.pageKeys).toEqual([
+        "/api/items",
+        "/api/items?cursor=cursor-1",
+        "/api/items?cursor=cursor-2",
+      ]);
     });
   });
 });
