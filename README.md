@@ -22,6 +22,7 @@ Stale-While-Revalidate data fetching library for [Qwik](https://qwik.dev).
 - **Timer coordination** -- shared timers for refreshInterval polling
 - **Memory-aware GC** -- maxEntries + deviceMemory-based adaptive limits
 - **Real-time subscriptions** -- WebSocket/SSE with auto-reconnect and cross-tab dedup
+- **Infinite loading** -- `useSWRInfinite` for cursor/offset pagination with per-page caching
 
 ## Install
 
@@ -336,7 +337,7 @@ Infinite loading / pagination hook. Each page is cached individually and pages a
 
 Extends `CommonSWROptions` (freshness, staleTime, revalidateOn, retry, retryInterval, timeout, refreshInterval, etc.) with:
 
-Inherited behavior from `useSWR`: retry with exponential backoff (per page), per-attempt timeout, focus/reconnect revalidation, refreshInterval via timer coordination, and `onErrorGlobal$` from `SWRProvider`.
+Inherited behavior from `useSWR`: retry with exponential backoff (per page), per-attempt timeout, focus/reconnect revalidation, refreshInterval via timer coordination, dedupingInterval (shared cooldown across instances), cacheTime per page key for GC, and `onErrorGlobal$` from `SWRProvider`. Callbacks (`onSuccess$`, `onError$`, `onErrorGlobal$`) fire on all fetch paths including `setSize$` and `mutate$` revalidation.
 
 | Option                 | Type      | Default | Description                                               |
 | ---------------------- | --------- | ------- | --------------------------------------------------------- |
@@ -915,6 +916,7 @@ See [`examples/basic/`](./examples/basic/) for a full Qwik City app demonstratin
 - **SWRDevtools** -- cache debug panel with revalidate/delete/export/import
 - **SSR + SWR + Subscription** -- three-layer real-time architecture
 - **Cross-tab sync** -- cache propagation across browser tabs
+- **useSWRInfinite** -- infinite scroll / load more with cursor and offset pagination
 
 ```bash
 cd examples/basic

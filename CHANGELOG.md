@@ -8,12 +8,22 @@
   - Sequential page fetching with cursor-based and offset-based pagination support
   - Individual page caching (each page cached by its own key)
   - `setSize$` for controlling the number of loaded pages
-  - `mutate$` for optimistic updates across all pages
+  - `mutate$` for optimistic updates across all pages (stable key refs prevent cursor corruption)
   - `isReachingEnd` detection (getKey returns null)
   - `isLoadingMore` / `isRefreshing` status flags
-  - Event-based revalidation (focus/reconnect)
+  - Per-page retry with exponential backoff and per-attempt timeout
+  - Event-based revalidation (focus/reconnect) and refreshInterval via timerCoordinator
   - `revalidateAll` option to refetch all pages on revalidation
+  - `dedupingInterval` via store's shared cooldownMap (cross-instance dedup, error cooldown)
+  - `cacheTime` registered per page key for proper GC awareness
+  - `onSuccess$` / `onError$` / `onErrorGlobal$` callbacks on all fetch paths (doFetch, setSize$, mutate$)
 - New types: `SWRInfiniteKeyLoader`, `SWRInfiniteOptions`, `SWRInfiniteResponse`
+- `store.startCooldown()` / `store.isCooldownActive()` public API for external cooldown management
+- `store.registerCacheConfig()` public API for external cacheTime/GC registration
+
+### Removed
+
+- `parallel`, `persistSize`, `revalidateFirstPage` options from `SWRInfiniteOptions` (were declared but unimplemented)
 
 ## [0.2.1] - 2026-03-12
 
