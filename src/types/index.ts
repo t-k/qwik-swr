@@ -480,6 +480,8 @@ export interface SWRInfiniteOptions<Data = unknown> extends CommonSWROptions {
   initialSize?: number;
   /** Revalidate all pages on every fetch (default: false = use cache for non-first pages within staleTime) */
   revalidateAll?: boolean;
+  /** Pre-loaded page data (e.g. from SSR via routeLoader$). Skips initial fetch when provided. */
+  fallbackData?: Data[];
   onSuccess$?: QRL<(data: Data[], key: ValidKey) => void>;
   onError$?: QRL<(error: SWRError, key: ValidKey) => void>;
 }

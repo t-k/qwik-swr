@@ -343,6 +343,7 @@ Inherited behavior from `useSWR`: retry with exponential backoff (per page), per
 | ---------------------- | --------- | ------- | --------------------------------------------------------- |
 | `initialSize`          | `number`  | `1`     | Number of pages to load initially                         |
 | `revalidateAll`        | `boolean` | `false` | Revalidate all pages on event triggers (not just first)   |
+| `fallbackData`         | `Data[]`  | --      | Pre-loaded pages from SSR (e.g. `routeLoader$`)           |
 | `onSuccess$`           | `QRL`     | --      | `(data: Data[], key) => void`                             |
 | `onError$`             | `QRL`     | --      | `(error: SWRError, key) => void`                          |
 
@@ -406,6 +407,30 @@ const allItems = data?.flat() ?? [];
 
 // Load more
 await setSize$((current) => current + 1);
+```
+
+#### Usage: SSR with routeLoader$
+
+```tsx
+import { routeLoader$ } from "@builder.io/qwik-city";
+import { useSWRInfinite } from "qwik-swr";
+
+export const useFirstPageLoader = routeLoader$(async () => {
+  const res = await fetch("https://api.example.com/items?page=0");
+  return res.json() as Promise<Item[]>;
+});
+
+export default component$(() => {
+  const loader = useFirstPageLoader();
+
+  const { data, setSize$, isLoadingMore } = useSWRInfinite<Item[]>(
+    $((pageIndex) => `/api/items?page=${pageIndex}`),
+    fetcher$,
+    { fallbackData: [loader.value] }, // first page from SSR
+  );
+
+  // data.value is available on first render -- no loading spinner for page 1
+});
 ```
 
 ---

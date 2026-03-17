@@ -113,8 +113,9 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     timeout: options.timeout,
     eagerness: options.eagerness,
   } : undefined);
+  const fallback = options?.fallbackData;
   const infiniteOpts = {
-    initialSize: options?.initialSize ?? 1,
+    initialSize: fallback ? Math.max(options?.initialSize ?? fallback.length, fallback.length) : (options?.initialSize ?? 1),
     revalidateAll: options?.revalidateAll ?? false,
   };
 
@@ -127,7 +128,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
 
   // ─── State (useStore) ───
   const state = useStore<SWRInfiniteResponse<Data>>({
-    data: undefined,
+    data: fallback ?? undefined,
     error: undefined,
     size: infiniteOpts.initialSize,
     setSize$: undefined as unknown as SWRInfiniteResponse<Data>["setSize$"],
@@ -270,7 +271,30 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
         await executeFetch(getKeyFn, fetcherFn, size, revalidateAll, signal, generation);
       };
 
-      // Initial fetch
+      // Seed cache from fallbackData (SSR) and resolve page keys
+      if (fallback && fallback.length > 0) {
+        const pageKeys: K[] = [];
+        for (let i = 0; i < fallback.length; i++) {
+          const prevData = i > 0 ? fallback[i - 1] : null;
+          const key = getKeyFn(i, prevData);
+          if (key === null) break;
+          pageKeys.push(key);
+          const hashed = hashKey(key);
+          store.registerCacheConfig(hashed, resolved);
+          store.setCache(hashed, { data: fallback[i], timestamp: Date.now() });
+        }
+        _internal.pageKeyHashes = pageKeys.map(hashKey);
+        _internal.currentSize = fallback.length;
+        state.size = fallback.length;
+
+        // Resolve cooldown key for dedup
+        const firstKey = getKeyFn(0, null);
+        if (firstKey !== null) {
+          _internal.cooldownKey = hashKey(firstKey) as HashedKey;
+        }
+      }
+
+      // Initial fetch (revalidates even with fallbackData — stale-while-revalidate)
       await doFetch(infiniteOpts.initialSize, false);
 
       // dedupingInterval guard for event-triggered revalidation.

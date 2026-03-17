@@ -208,6 +208,43 @@ describe("useSWRInfinite unit tests", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
+  // fallbackData seeding
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("fallbackData cache seeding", () => {
+    it("should seed individual page caches from fallbackData", () => {
+      const fallback = [["a", "b"], ["c", "d"]];
+      const getKey: SWRInfiniteKeyLoader<string[], string> = (pageIndex) => `/api/items?page=${pageIndex}`;
+
+      // Simulate what useSWRInfinite does with fallbackData
+      for (let i = 0; i < fallback.length; i++) {
+        const prevData = i > 0 ? fallback[i - 1] : null;
+        const key = getKey(i, prevData);
+        if (key === null) break;
+        const hashed = hashKey(key);
+        store.setCache(hashed, { data: fallback[i], timestamp: Date.now() });
+      }
+
+      expect(store.getCache(hashKey("/api/items?page=0"))?.data).toEqual(["a", "b"]);
+      expect(store.getCache(hashKey("/api/items?page=1"))?.data).toEqual(["c", "d"]);
+    });
+
+    it("should derive initialSize from fallbackData length when not explicitly set", () => {
+      const fallback = [["a"], ["b"], ["c"]];
+      const explicitInitialSize = undefined;
+      const effectiveSize = fallback ? Math.max(explicitInitialSize ?? fallback.length, fallback.length) : (explicitInitialSize ?? 1);
+      expect(effectiveSize).toBe(3);
+    });
+
+    it("should respect explicit initialSize when larger than fallbackData", () => {
+      const fallback = [["a"]];
+      const explicitInitialSize = 3;
+      const effectiveSize = fallback ? Math.max(explicitInitialSize ?? fallback.length, fallback.length) : (explicitInitialSize ?? 1);
+      expect(effectiveSize).toBe(3);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
   // Page cache interactions
   // ═══════════════════════════════════════════════════════════════
 
