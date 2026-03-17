@@ -147,12 +147,16 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     /** Stable page keys from the last successful fetch. Used by mutate$ to
      *  write cache entries without re-deriving keys from (possibly mutated) data. */
     pageKeyHashes: HashedKey[];
+    /** Timestamp of last successful fetch completion. Used for dedupingInterval
+     *  to suppress rapid event-triggered revalidation (focus/reconnect/interval). */
+    lastFetchCompletedAt: number;
   }>({
     currentSize: infiniteOpts.initialSize,
     isFetching: false,
     tornDown: false,
     fetchGeneration: 0,
     pageKeyHashes: [],
+    lastFetchCompletedAt: 0,
   });
 
   // ─── Shared fetch logic ───
@@ -186,6 +190,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
       state.error = undefined;
       state.isReachingEnd = result.reachedEnd;
       _internal.pageKeyHashes = result.pageKeys.map(hashKey);
+      _internal.lastFetchCompletedAt = Date.now();
 
       // onSuccess callback
       await invokeOnSuccess(options, getKeyFn, result.pages);
@@ -250,17 +255,31 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
       // Initial fetch
       await doFetch(infiniteOpts.initialSize, false);
 
-      // Event-based revalidation (focus/reconnect)
+      // dedupingInterval guard for event-triggered revalidation.
+      // Suppresses rapid re-fetches from focus/reconnect/interval if the last
+      // successful fetch completed within dedupingInterval. Does NOT affect
+      // setSize$ or mutate$ which are explicit user actions.
+      const shouldSuppressRevalidation = (): boolean => {
+        if (resolved.dedupingInterval <= 0) return false;
+        const elapsed = Date.now() - _internal.lastFetchCompletedAt;
+        return elapsed < resolved.dedupingInterval;
+      };
+
+      // Event-based revalidation (focus/reconnect) with dedup suppression
       const eventCleanup = initEventManager(resolved.revalidateOn, () => {
-        doFetch(_internal.currentSize, infiniteOpts.revalidateAll);
+        if (!shouldSuppressRevalidation()) {
+          doFetch(_internal.currentSize, infiniteOpts.revalidateAll);
+        }
       });
 
-      // Interval revalidation via TimerCoordinator
+      // Interval revalidation via TimerCoordinator with dedup suppression
       let unregisterTimer: (() => void) | null = null;
       if (resolved.refreshInterval > 0 && resolved.revalidateOn.includes("interval")) {
         const timerId = generateId("inf");
         unregisterTimer = timerCoordinator.register(resolved.refreshInterval, timerId, () => {
-          doFetch(_internal.currentSize, infiniteOpts.revalidateAll);
+          if (!shouldSuppressRevalidation()) {
+            doFetch(_internal.currentSize, infiniteOpts.revalidateAll);
+          }
         });
       }
 

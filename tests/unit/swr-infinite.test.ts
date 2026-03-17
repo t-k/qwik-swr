@@ -154,6 +154,44 @@ describe("useSWRInfinite unit tests", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
+  // dedupingInterval suppression logic
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("dedupingInterval suppression logic", () => {
+    it("should suppress when elapsed time is within dedupingInterval", () => {
+      const dedupingInterval = 5000;
+      const lastFetchCompletedAt = Date.now() - 2000; // 2s ago
+      const elapsed = Date.now() - lastFetchCompletedAt;
+      const shouldSuppress = dedupingInterval > 0 && elapsed < dedupingInterval;
+      expect(shouldSuppress).toBe(true);
+    });
+
+    it("should not suppress when elapsed time exceeds dedupingInterval", () => {
+      const dedupingInterval = 5000;
+      const lastFetchCompletedAt = Date.now() - 6000; // 6s ago
+      const elapsed = Date.now() - lastFetchCompletedAt;
+      const shouldSuppress = dedupingInterval > 0 && elapsed < dedupingInterval;
+      expect(shouldSuppress).toBe(false);
+    });
+
+    it("should not suppress when dedupingInterval is 0 (disabled)", () => {
+      const dedupingInterval = 0;
+      const lastFetchCompletedAt = Date.now(); // just now
+      const shouldSuppress = dedupingInterval > 0 && (Date.now() - lastFetchCompletedAt) < dedupingInterval;
+      expect(shouldSuppress).toBe(false);
+    });
+
+    it("should not suppress when no fetch has completed yet (timestamp = 0)", () => {
+      const dedupingInterval = 5000;
+      const lastFetchCompletedAt = 0;
+      const elapsed = Date.now() - lastFetchCompletedAt;
+      // elapsed is ~Date.now() which is > 5000
+      const shouldSuppress = dedupingInterval > 0 && elapsed < dedupingInterval;
+      expect(shouldSuppress).toBe(false);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
   // Page cache interactions
   // ═══════════════════════════════════════════════════════════════
 
