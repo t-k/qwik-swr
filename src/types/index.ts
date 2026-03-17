@@ -464,3 +464,51 @@ export interface InitOptions {
    */
   hydration?: "eager" | "lazy";
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Infinite Types
+// ═══════════════════════════════════════════════════════════════
+
+/** Key generator for useSWRInfinite. Returns null to stop loading more pages. */
+export type SWRInfiniteKeyLoader<Data = unknown, K extends ValidKey = ValidKey> = (
+  pageIndex: number,
+  previousPageData: Data | null,
+) => K | null;
+
+export interface SWRInfiniteOptions<Data = unknown> extends CommonSWROptions {
+  /** Initial number of pages to load (default: 1) */
+  initialSize?: number;
+  /** Revalidate all pages or only changed ones (default: false = only first page) */
+  revalidateAll?: boolean;
+  /** Revalidate first page on focus/reconnect (default: true) */
+  revalidateFirstPage?: boolean;
+  /** Keep size when key changes (default: false) */
+  persistSize?: boolean;
+  /** Parallel fetch for all pages (default: false, sequential by default since getKey depends on previous data) */
+  parallel?: boolean;
+  onSuccess$?: QRL<(data: Data[], key: ValidKey) => void>;
+  onError$?: QRL<(error: SWRError, key: ValidKey) => void>;
+}
+
+export interface SWRInfiniteResponse<Data> {
+  /** All pages of data */
+  data: Data[] | undefined;
+  /** Latest error */
+  error: SWRError | undefined;
+  /** Current number of pages */
+  size: number;
+  /** Set number of pages (triggers fetch for new pages) */
+  setSize$: QRL<(size: number | ((currentSize: number) => number)) => void>;
+  /** Revalidate all loaded pages */
+  mutate$: QRL<(data?: Data[] | ((current: Data[] | undefined) => Data[]), options?: { revalidate?: boolean }) => Promise<void>>;
+  /** Loading initial data (no data yet) */
+  isLoading: boolean;
+  /** Loading more pages (data exists, fetching next) */
+  isLoadingMore: boolean;
+  /** Any validation in progress */
+  isValidating: boolean;
+  /** No more pages (getKey returned null for next page) */
+  isReachingEnd: boolean;
+  /** Refreshing existing pages */
+  isRefreshing: boolean;
+}

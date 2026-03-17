@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] - 2026-03-17
+
+### Added
+
+- `useSWRInfinite` hook for infinite loading / paginated data fetching
+  - Sequential page fetching with cursor-based and offset-based pagination support
+  - Individual page caching (each page cached by its own key)
+  - `setSize$` for controlling the number of loaded pages
+  - `mutate$` for optimistic updates across all pages
+  - `isReachingEnd` detection (getKey returns null)
+  - `isLoadingMore` / `isRefreshing` status flags
+  - Event-based revalidation (focus/reconnect)
+  - `revalidateAll` option to refetch all pages on revalidation
+- New types: `SWRInfiniteKeyLoader`, `SWRInfiniteOptions`, `SWRInfiniteResponse`
+
 ## [0.2.1] - 2026-03-12
 
 ### Fixed
