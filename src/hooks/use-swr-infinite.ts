@@ -4,7 +4,9 @@ import type {
   ValidKey,
   HashedKey,
   Fetcher,
+  FetcherCtx,
   SWRError,
+  ResolvedSWROptions,
   SWRInfiniteOptions,
   SWRInfiniteResponse,
   SWRInfiniteResponseWithData,
@@ -61,6 +63,124 @@ async function invokeOnError<Data, K extends ValidKey>(
   if (providerConfig?.onErrorGlobal$) {
     const onErrorGlobal = await providerConfig.onErrorGlobal$.resolve();
     onErrorGlobal(swrError, firstKey);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Module-level functions for QRL-safe capture
+//
+// These must be at module level (not nested inside useSWRInfinite)
+// because they are referenced from $() closures. Qwik's optimizer
+// cannot serialize nested function declarations across QRL boundaries,
+// causing production build crashes. Context is passed explicitly.
+// ═══════════════════════════════════════════════════════════════
+
+/** Shared mutable state for infinite hook, passed to module-level functions. */
+interface InfiniteInternal {
+  currentSize: number;
+  isFetching: boolean;
+  tornDown: boolean;
+  fetchGeneration: number;
+  pageKeyHashes: HashedKey[];
+  cooldownKey: HashedKey;
+}
+
+/** Context passed to module-level executeFetch / abortCurrentFetch. */
+interface InfiniteContext<Data> {
+  state: SWRInfiniteResponse<Data>;
+  _internal: InfiniteInternal;
+  resolved: ResolvedSWROptions<Data>;
+  retryConfig: PageRetryConfig;
+  options: SWRInfiniteOptions<Data> | undefined;
+  providerConfig: SWRConfig | undefined;
+}
+
+/**
+ * Abort the current fetch across all paths (doFetch, setSize$, mutate$).
+ * Incrementing fetchGeneration causes stale results to be discarded.
+ */
+function abortCurrentFetch(
+  _internal: InfiniteInternal,
+): { signal: AbortSignal; generation: number } {
+  _internal.fetchGeneration++;
+  const controller = new AbortController();
+  return { signal: controller.signal, generation: _internal.fetchGeneration };
+}
+
+/**
+ * Shared fetch logic: fetch pages, update state, invoke callbacks.
+ * Handles generation guard and cooldown.
+ */
+async function executeFetch<Data, K extends ValidKey>(
+  ctx: InfiniteContext<Data>,
+  getKeyFn: SWRInfiniteKeyLoader<Data, K>,
+  fetcherFn: (fctx: FetcherCtx<K>) => Data | Promise<Data>,
+  size: number,
+  revalidateAll: boolean,
+  signal: AbortSignal,
+  generation: number,
+): Promise<FetchPagesResult<Data, K> | null> {
+  const { state, _internal, resolved, retryConfig, options, providerConfig } = ctx;
+
+  // Resolve cooldown key from first page (stable identifier for the list)
+  const firstKey = getKeyFn(0, null);
+  if (firstKey !== null) {
+    _internal.cooldownKey = hashKey(firstKey);
+  }
+
+  try {
+    const result = await fetchAllPages<Data, K>({
+      getKeyFn,
+      fetcherFn,
+      size,
+      revalidateAll,
+      staleTime: resolved.staleTime,
+      signal,
+      retryConfig,
+      resolvedConfig: resolved,
+    });
+
+    // Guard: only update state if this fetch is still the latest
+    if (generation !== _internal.fetchGeneration) return null;
+
+    state.data = result.pages;
+    state.error = undefined;
+    state.isReachingEnd = result.reachedEnd;
+    _internal.pageKeyHashes = result.pageKeys.map(hashKey);
+
+    // Start shared cooldown (success path)
+    if (_internal.cooldownKey) {
+      store.startCooldown(_internal.cooldownKey, resolved.dedupingInterval);
+    }
+
+    // onSuccess callback
+    await invokeOnSuccess(options, getKeyFn, result.pages);
+
+    return result;
+  } catch (err) {
+    if (generation !== _internal.fetchGeneration) return null;
+    if (err instanceof DOMException && err.name === "AbortError") return null;
+
+    const swrError = toSWRError(err);
+    state.error = swrError;
+
+    // Start shared cooldown (error path)
+    if (_internal.cooldownKey) {
+      store.startCooldown(_internal.cooldownKey, resolved.dedupingInterval);
+    }
+
+    // onError + onErrorGlobal$ callbacks
+    await invokeOnError(options, providerConfig, getKeyFn, swrError);
+
+    return null;
+  } finally {
+    if (generation === _internal.fetchGeneration) {
+      state.isLoading = false;
+      state.isLoadingMore = false;
+      state.isValidating = false;
+      state.isRefreshing = false;
+      _internal.isFetching = false;
+    }
   }
 }
 
@@ -157,17 +277,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   });
 
   // Internal mutable ref for tracking state across QRL boundaries.
-  const _internal = useStore<{
-    currentSize: number;
-    isFetching: boolean;
-    tornDown: boolean;
-    fetchGeneration: number;
-    /** Stable page keys from the last successful fetch. Used by mutate$ to
-     *  write cache entries without re-deriving keys from (possibly mutated) data. */
-    pageKeyHashes: HashedKey[];
-    /** Hashed first-page key, used as the cooldown identifier in store's shared cooldownMap. */
-    cooldownKey: HashedKey;
-  }>({
+  const _internal = useStore<InfiniteInternal>({
     currentSize: infiniteOpts.initialSize,
     isFetching: false,
     tornDown: false,
@@ -176,87 +286,16 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     cooldownKey: "" as HashedKey,
   });
 
-  // ─── Shared fetch logic ───
-  // Handles fetch, callbacks, generation guard, and cooldown.
-  // Used by doFetch (lifecycle), setSize$, and mutate$ revalidation.
-
-  async function executeFetch(
-    getKeyFn: SWRInfiniteKeyLoader<Data, K>,
-    fetcherFn: (ctx: import("../types/index.ts").FetcherCtx<K>) => Data | Promise<Data>,
-    size: number,
-    revalidateAll: boolean,
-    signal: AbortSignal,
-    generation: number,
-  ): Promise<FetchPagesResult<Data, K> | null> {
-    // Resolve cooldown key from first page (stable identifier for the list)
-    const firstKey = getKeyFn(0, null);
-    if (firstKey !== null) {
-      _internal.cooldownKey = hashKey(firstKey);
-    }
-
-    try {
-      const result = await fetchAllPages<Data, K>({
-        getKeyFn,
-        fetcherFn,
-        size,
-        revalidateAll,
-        staleTime: resolved.staleTime,
-        signal,
-        retryConfig,
-        resolvedConfig: resolved,
-      });
-
-      // Guard: only update state if this fetch is still the latest
-      if (generation !== _internal.fetchGeneration) return null;
-
-      state.data = result.pages;
-      state.error = undefined;
-      state.isReachingEnd = result.reachedEnd;
-      _internal.pageKeyHashes = result.pageKeys.map(hashKey);
-
-      // Start shared cooldown (success path)
-      if (_internal.cooldownKey) {
-        store.startCooldown(_internal.cooldownKey, resolved.dedupingInterval);
-      }
-
-      // onSuccess callback
-      await invokeOnSuccess(options, getKeyFn, result.pages);
-
-      return result;
-    } catch (err) {
-      if (generation !== _internal.fetchGeneration) return null;
-      if (err instanceof DOMException && err.name === "AbortError") return null;
-
-      const swrError = toSWRError(err);
-      state.error = swrError;
-
-      // Start shared cooldown (error path)
-      if (_internal.cooldownKey) {
-        store.startCooldown(_internal.cooldownKey, resolved.dedupingInterval);
-      }
-
-      // onError + onErrorGlobal$ callbacks
-      await invokeOnError(options, providerConfig, getKeyFn, swrError);
-
-      return null;
-    } finally {
-      if (generation === _internal.fetchGeneration) {
-        state.isLoading = false;
-        state.isLoadingMore = false;
-        state.isValidating = false;
-        state.isRefreshing = false;
-        _internal.isFetching = false;
-      }
-    }
-  }
-
-  // Abort the current fetch across all paths (doFetch, setSize$, mutate$).
-  // Incrementing fetchGeneration causes stale results to be discarded.
-  function abortCurrentFetch(): { signal: AbortSignal; generation: number } {
-    _internal.fetchGeneration++;
-    const controller = new AbortController();
-    return { signal: controller.signal, generation: _internal.fetchGeneration };
-  }
+  // Context object for module-level functions.
+  // All fields are serializable (useStore results, plain objects, QRL options).
+  const infiniteCtx: InfiniteContext<Data> = {
+    state,
+    _internal,
+    resolved,
+    retryConfig,
+    options,
+    providerConfig,
+  };
 
   // ─── Main lifecycle ───
   useVisibleTask$(
@@ -271,7 +310,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
         _internal.currentSize = size;
         state.size = size;
 
-        const { signal, generation } = abortCurrentFetch();
+        const { signal, generation } = abortCurrentFetch(_internal);
         _internal.isFetching = true;
 
         const hasExistingData = state.data != null && state.data.length > 0;
@@ -284,7 +323,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
         }
         state.isValidating = true;
 
-        await executeFetch(getKeyFn, fetcherFn, size, revalidateAll, signal, generation);
+        await executeFetch(infiniteCtx, getKeyFn, fetcherFn, size, revalidateAll, signal, generation);
       };
 
       // Seed cache from fallbackData (SSR) and resolve page keys
@@ -350,6 +389,8 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   );
 
   // ─── setSize$ ───
+  // Module-level functions (executeFetch, abortCurrentFetch) are called via
+  // infiniteCtx — no nested function captures in this $() closure.
   const _setSize$ = $(async (sizeOrFn: number | ((current: number) => number)) => {
     const newSize = typeof sizeOrFn === "function" ? sizeOrFn(_internal.currentSize) : sizeOrFn;
     if (newSize < 0 || !Number.isFinite(newSize)) return;
@@ -373,7 +414,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     const fetcherFn = await fetcher.resolve();
 
     // SF-1: Use shared generation to abort any in-flight fetch (lifecycle or prior setSize$)
-    const { signal, generation } = abortCurrentFetch();
+    const { signal, generation } = abortCurrentFetch(_internal);
 
     const hasExistingData = currentPages != null && currentPages.length > 0;
     if (!hasExistingData) {
@@ -385,7 +426,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     }
     state.isValidating = true;
 
-    await executeFetch(getKeyFn, fetcherFn, newSize, false, signal, generation);
+    await executeFetch(infiniteCtx, getKeyFn, fetcherFn, newSize, false, signal, generation);
   });
 
   // ─── mutate$ ───
@@ -418,13 +459,13 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
       const fetcherFn = await fetcher.resolve();
 
       // SF-1: Use shared generation to abort any in-flight fetch
-      const { signal, generation } = abortCurrentFetch();
+      const { signal, generation } = abortCurrentFetch(_internal);
 
       state.isRefreshing = true;
       state.isValidating = true;
 
       // SF-2: Use infiniteOpts.revalidateAll instead of hardcoded true
-      await executeFetch(getKeyFn, fetcherFn, _internal.currentSize, infiniteOpts.revalidateAll, signal, generation);
+      await executeFetch(infiniteCtx, getKeyFn, fetcherFn, _internal.currentSize, infiniteOpts.revalidateAll, signal, generation);
     }
   });
 
