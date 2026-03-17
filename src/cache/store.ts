@@ -91,6 +91,12 @@ export interface CacheStoreApi {
   /** Register cache config for a key (used by useSWRInfinite for GC/cacheTime awareness). */
   registerCacheConfig(hashedKey: HashedKey, opts: ResolvedQueryConfig): void;
 
+  // Cooldown (shared dedup for useSWRInfinite)
+  /** Start a dedup cooldown for the given key. */
+  startCooldown(hashedKey: HashedKey, dedupingInterval: number): void;
+  /** Check if a dedup cooldown is active and within interval. */
+  isCooldownActive(hashedKey: HashedKey, dedupingInterval: number): boolean;
+
   // Debug / Export / Import
   getDebugSnapshot(): DebugSnapshot;
   export(): CacheExport;
@@ -484,6 +490,18 @@ function createCacheStore(): CacheStoreApi {
       if (!state.queryConfigMap.has(hashedKey)) {
         state.queryConfigMap.set(hashedKey, opts);
       }
+    },
+
+    startCooldown(hashedKey: HashedKey, dedupingInterval: number): void {
+      fetchEngine.startCooldown(hashedKey, dedupingInterval);
+    },
+
+    isCooldownActive(hashedKey: HashedKey, dedupingInterval: number): boolean {
+      if (dedupingInterval <= 0) return false;
+      const cooldown = state.cooldownMap.get(hashedKey);
+      if (!cooldown) return false;
+      const elapsed = Date.now() - cooldown.completedAt;
+      return elapsed < dedupingInterval;
     },
 
     // ═══════════════════════════════════════════════════════════════

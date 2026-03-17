@@ -154,40 +154,56 @@ describe("useSWRInfinite unit tests", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // dedupingInterval suppression logic
+  // dedupingInterval via shared cooldownMap
   // ═══════════════════════════════════════════════════════════════
 
-  describe("dedupingInterval suppression logic", () => {
-    it("should suppress when elapsed time is within dedupingInterval", () => {
-      const dedupingInterval = 5000;
-      const lastFetchCompletedAt = Date.now() - 2000; // 2s ago
-      const elapsed = Date.now() - lastFetchCompletedAt;
-      const shouldSuppress = dedupingInterval > 0 && elapsed < dedupingInterval;
-      expect(shouldSuppress).toBe(true);
+  describe("dedupingInterval via shared cooldownMap", () => {
+    it("should suppress revalidation when cooldown is active", () => {
+      const cooldownKey = hashKey("/api/items?page=0");
+
+      // Start cooldown (simulates post-fetch)
+      store.startCooldown(cooldownKey, 5000);
+
+      // Check: should be active
+      expect(store.isCooldownActive(cooldownKey, 5000)).toBe(true);
     });
 
-    it("should not suppress when elapsed time exceeds dedupingInterval", () => {
-      const dedupingInterval = 5000;
-      const lastFetchCompletedAt = Date.now() - 6000; // 6s ago
-      const elapsed = Date.now() - lastFetchCompletedAt;
-      const shouldSuppress = dedupingInterval > 0 && elapsed < dedupingInterval;
-      expect(shouldSuppress).toBe(false);
+    it("should not suppress after cooldown expires", () => {
+      vi.useFakeTimers();
+      const cooldownKey = hashKey("/api/items?page=0");
+
+      store.startCooldown(cooldownKey, 100);
+      expect(store.isCooldownActive(cooldownKey, 100)).toBe(true);
+
+      vi.advanceTimersByTime(200);
+      // Cooldown entry is auto-deleted by setTimeout in startCooldown
+      expect(store.isCooldownActive(cooldownKey, 100)).toBe(false);
+
+      vi.useRealTimers();
     });
 
-    it("should not suppress when dedupingInterval is 0 (disabled)", () => {
-      const dedupingInterval = 0;
-      const lastFetchCompletedAt = Date.now(); // just now
-      const shouldSuppress = dedupingInterval > 0 && (Date.now() - lastFetchCompletedAt) < dedupingInterval;
-      expect(shouldSuppress).toBe(false);
+    it("should not suppress when dedupingInterval is 0", () => {
+      const cooldownKey = hashKey("/api/items?page=0");
+      store.startCooldown(cooldownKey, 0);
+      expect(store.isCooldownActive(cooldownKey, 0)).toBe(false);
     });
 
-    it("should not suppress when no fetch has completed yet (timestamp = 0)", () => {
-      const dedupingInterval = 5000;
-      const lastFetchCompletedAt = 0;
-      const elapsed = Date.now() - lastFetchCompletedAt;
-      // elapsed is ~Date.now() which is > 5000
-      const shouldSuppress = dedupingInterval > 0 && elapsed < dedupingInterval;
-      expect(shouldSuppress).toBe(false);
+    it("should share cooldown across multiple callers using the same key", () => {
+      const cooldownKey = hashKey("/api/items?page=0");
+
+      // Instance A starts cooldown
+      store.startCooldown(cooldownKey, 5000);
+
+      // Instance B checks: should be suppressed
+      expect(store.isCooldownActive(cooldownKey, 5000)).toBe(true);
+    });
+
+    it("should start cooldown on error (same as success)", () => {
+      const cooldownKey = hashKey("/api/items?page=0");
+
+      // Simulating error path also starting cooldown
+      store.startCooldown(cooldownKey, 5000);
+      expect(store.isCooldownActive(cooldownKey, 5000)).toBe(true);
     });
   });
 

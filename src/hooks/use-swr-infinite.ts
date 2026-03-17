@@ -80,6 +80,7 @@ async function invokeOnError<Data, K extends ValidKey>(
  * - refreshInterval via timerCoordinator
  * - onSuccess$/onError$/onErrorGlobal$ callbacks on all fetch paths
  * - cacheTime registered per page key for GC awareness
+ * - dedupingInterval via store's shared cooldownMap (cross-instance)
  */
 export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   getKey: QRL<SWRInfiniteKeyLoader<Data, K>>,
@@ -147,20 +148,20 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     /** Stable page keys from the last successful fetch. Used by mutate$ to
      *  write cache entries without re-deriving keys from (possibly mutated) data. */
     pageKeyHashes: HashedKey[];
-    /** Timestamp of last successful fetch completion. Used for dedupingInterval
-     *  to suppress rapid event-triggered revalidation (focus/reconnect/interval). */
-    lastFetchCompletedAt: number;
+    /** Hashed first-page key, used as the cooldown identifier in store's shared cooldownMap.
+     *  This enables cross-instance dedup for the same infinite list. */
+    cooldownKey: HashedKey;
   }>({
     currentSize: infiniteOpts.initialSize,
     isFetching: false,
     tornDown: false,
     fetchGeneration: 0,
     pageKeyHashes: [],
-    lastFetchCompletedAt: 0,
+    cooldownKey: "" as HashedKey,
   });
 
   // ─── Shared fetch logic ───
-  // Handles state transitions, fetch, callbacks, and generation guard.
+  // Handles state transitions, fetch, callbacks, generation guard, and cooldown.
   // Used by doFetch (lifecycle), setSize$, and mutate$ revalidation.
 
   async function executeFetch(
@@ -171,6 +172,12 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     signal: AbortSignal,
     generation: number,
   ): Promise<FetchPagesResult<Data, K> | null> {
+    // Resolve cooldown key from first page (stable identifier for the list)
+    const firstKey = getKeyFn(0, null);
+    if (firstKey !== null) {
+      _internal.cooldownKey = hashKey(firstKey);
+    }
+
     try {
       const result = await fetchAllPages<Data, K>({
         getKeyFn,
@@ -190,7 +197,11 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
       state.error = undefined;
       state.isReachingEnd = result.reachedEnd;
       _internal.pageKeyHashes = result.pageKeys.map(hashKey);
-      _internal.lastFetchCompletedAt = Date.now();
+
+      // Start shared cooldown (success path — matches store-fetch.ts L184-185)
+      if (_internal.cooldownKey) {
+        store.startCooldown(_internal.cooldownKey, resolved.dedupingInterval);
+      }
 
       // onSuccess callback
       await invokeOnSuccess(options, getKeyFn, result.pages);
@@ -202,6 +213,11 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
 
       const swrError = toSWRError(err);
       state.error = swrError;
+
+      // Start shared cooldown (error path — matches store-fetch.ts L251-252)
+      if (_internal.cooldownKey) {
+        store.startCooldown(_internal.cooldownKey, resolved.dedupingInterval);
+      }
 
       // onError + onErrorGlobal$ callbacks
       await invokeOnError(options, providerConfig, getKeyFn, swrError);
@@ -256,13 +272,12 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
       await doFetch(infiniteOpts.initialSize, false);
 
       // dedupingInterval guard for event-triggered revalidation.
-      // Suppresses rapid re-fetches from focus/reconnect/interval if the last
-      // successful fetch completed within dedupingInterval. Does NOT affect
-      // setSize$ or mutate$ which are explicit user actions.
+      // Uses store's shared cooldownMap keyed by first-page hash, so multiple
+      // useSWRInfinite instances with the same getKey share the same cooldown.
+      // Does NOT affect setSize$ or mutate$ which are explicit user actions.
       const shouldSuppressRevalidation = (): boolean => {
-        if (resolved.dedupingInterval <= 0) return false;
-        const elapsed = Date.now() - _internal.lastFetchCompletedAt;
-        return elapsed < resolved.dedupingInterval;
+        if (!_internal.cooldownKey) return false;
+        return store.isCooldownActive(_internal.cooldownKey, resolved.dedupingInterval);
       };
 
       // Event-based revalidation (focus/reconnect) with dedup suppression
