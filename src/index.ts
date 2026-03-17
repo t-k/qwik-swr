@@ -45,6 +45,10 @@ export type {
   SyncMessage,
   BatchingConfig,
   InitOptions,
+  // Infinite
+  SWRInfiniteKeyLoader,
+  SWRInfiniteOptions,
+  SWRInfiniteResponse,
 } from "./types/index.ts";
 
 // Constants
@@ -70,6 +74,7 @@ export { initSWR } from "./init.ts";
 // Hooks
 export { useSWR } from "./hooks/use-swr.ts";
 export { useMutation } from "./hooks/use-mutation.ts";
+export { useSWRInfinite } from "./hooks/use-swr-infinite.ts";
 
 // Cache API
 export { cache } from "./cache/cache-api.ts";
