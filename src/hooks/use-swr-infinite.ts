@@ -52,9 +52,6 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   const infiniteOpts = {
     initialSize: options?.initialSize ?? 1,
     revalidateAll: options?.revalidateAll ?? false,
-    revalidateFirstPage: options?.revalidateFirstPage ?? true,
-    persistSize: options?.persistSize ?? false,
-    parallel: options?.parallel ?? false,
   };
 
   // ─── State (useStore) ───
@@ -184,7 +181,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
   // ─── setSize$ ───
   const _setSize$ = $(async (sizeOrFn: number | ((current: number) => number)) => {
     const newSize = typeof sizeOrFn === "function" ? sizeOrFn(_internal.currentSize) : sizeOrFn;
-    if (newSize < 0) return;
+    if (newSize < 0 || !Number.isFinite(newSize)) return;
 
     _internal.currentSize = newSize;
     state.size = newSize;

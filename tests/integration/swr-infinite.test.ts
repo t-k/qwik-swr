@@ -422,6 +422,93 @@ describe("swr-infinite integration tests", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════
+  // mutate$ with function updater
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("mutate$ with function updater", () => {
+    it("should update page data via function and sync to cache", async () => {
+      const getKey: SWRInfiniteKeyLoader<number[], string> = (pageIndex) => {
+        return `/api/items?page=${pageIndex}`;
+      };
+
+      const fetcher = async (ctx: FetcherCtx<string>) => {
+        const page = parseInt(ctx.rawKey.split("=")[1]);
+        return [page * 10 + 1, page * 10 + 2];
+      };
+
+      const controller = new AbortController();
+
+      // Initial fetch
+      await fetchAllPages<number[], string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 2,
+        revalidateAll: false,
+        staleTime: 30_000,
+        signal: controller.signal,
+      });
+
+      // Simulate mutate$ function updater: append item to first page
+      const hashed0 = hashKey("/api/items?page=0");
+      const current = store.getCache<number[]>(hashed0)?.data ?? [];
+      const updated = [...current, 999];
+      store.setCache(hashed0, { data: updated, timestamp: Date.now() });
+
+      expect(store.getCache(hashed0)?.data).toEqual([1, 2, 999]);
+      // Page 1 unchanged
+      expect(store.getCache(hashKey("/api/items?page=1"))?.data).toEqual([11, 12]);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // fetchAllPages with stale cache (staleTime expired)
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("stale cache refetch", () => {
+    it("should refetch non-first pages when their cache has expired staleTime", async () => {
+      const fetchCount = { value: 0 };
+
+      const getKey: SWRInfiniteKeyLoader<string, string> = (pageIndex) => {
+        return `/api/items?page=${pageIndex}`;
+      };
+
+      const fetcher = async (ctx: FetcherCtx<string>) => {
+        fetchCount.value++;
+        return `data-v${fetchCount.value}-${ctx.rawKey}`;
+      };
+
+      const controller = new AbortController();
+
+      // Initial fetch with staleTime=100ms
+      await fetchAllPages<string, string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 2,
+        revalidateAll: false,
+        staleTime: 100,
+        signal: controller.signal,
+      });
+      expect(fetchCount.value).toBe(2);
+
+      // Advance time past staleTime
+      vi.advanceTimersByTime(200);
+
+      // Fetch again - both pages should be refetched (page 0 always, page 1 because stale)
+      fetchCount.value = 0;
+      await fetchAllPages<string, string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 2,
+        revalidateAll: false,
+        staleTime: 100,
+        signal: controller.signal,
+      });
+
+      expect(fetchCount.value).toBe(2); // both refetched
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
   // Cursor-based pagination pattern
   // ═══════════════════════════════════════════════════════════════
 

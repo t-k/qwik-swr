@@ -340,9 +340,6 @@ Extends `CommonSWROptions` (freshness, staleTime, revalidateOn, retry, etc.) wit
 | ---------------------- | --------- | ------- | --------------------------------------------------------- |
 | `initialSize`          | `number`  | `1`     | Number of pages to load initially                         |
 | `revalidateAll`        | `boolean` | `false` | Revalidate all pages on event triggers (not just first)   |
-| `revalidateFirstPage`  | `boolean` | `true`  | Revalidate first page on focus/reconnect                  |
-| `persistSize`          | `boolean` | `false` | Keep page count when key changes                          |
-| `parallel`             | `boolean` | `false` | Fetch pages in parallel (only when keys are independent)  |
 | `onSuccess$`           | `QRL`     | --      | `(data: Data[], key) => void`                             |
 | `onError$`             | `QRL`     | --      | `(error: SWRError, key) => void`                          |
 

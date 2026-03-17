@@ -478,14 +478,8 @@ export type SWRInfiniteKeyLoader<Data = unknown, K extends ValidKey = ValidKey> 
 export interface SWRInfiniteOptions<Data = unknown> extends CommonSWROptions {
   /** Initial number of pages to load (default: 1) */
   initialSize?: number;
-  /** Revalidate all pages or only changed ones (default: false = only first page) */
+  /** Revalidate all pages on every fetch (default: false = use cache for non-first pages within staleTime) */
   revalidateAll?: boolean;
-  /** Revalidate first page on focus/reconnect (default: true) */
-  revalidateFirstPage?: boolean;
-  /** Keep size when key changes (default: false) */
-  persistSize?: boolean;
-  /** Parallel fetch for all pages (default: false, sequential by default since getKey depends on previous data) */
-  parallel?: boolean;
   onSuccess$?: QRL<(data: Data[], key: ValidKey) => void>;
   onError$?: QRL<(error: SWRError, key: ValidKey) => void>;
 }
