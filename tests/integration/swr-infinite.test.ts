@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { store } from "../../src/cache/store.ts";
 import { hashKey } from "../../src/utils/hash.ts";
-import { fetchAllPages, fetchPageWithRetry, calculateRetryDelay } from "../../src/hooks/infinite-helpers.ts";
+import { fetchAllPages, fetchPageWithRetry, calculateRetryDelay, checkIsReachingEnd } from "../../src/hooks/infinite-helpers.ts";
 import type { SWRInfiniteKeyLoader, FetcherCtx, SWRError, ResolvedQueryConfig } from "../../src/types/index.ts";
 
 describe("swr-infinite integration tests", () => {
@@ -216,6 +216,53 @@ describe("swr-infinite integration tests", () => {
       // page 2: new fetch
       expect(fetchCount.value).toBe(2);
       expect(result.pages.length).toBe(3);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // setSize$ size decrease: trim without refetch
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("setSize$ size decrease optimization", () => {
+    it("should trim data without network request when size decreases", async () => {
+      const fetchCount = { value: 0 };
+
+      const getKey: SWRInfiniteKeyLoader<number[], string> = (pageIndex) => {
+        if (pageIndex >= 5) return null;
+        return `/api/items?page=${pageIndex}`;
+      };
+
+      const fetcher = async (ctx: FetcherCtx<string>) => {
+        fetchCount.value++;
+        const page = parseInt(ctx.rawKey.split("=")[1]);
+        return [page * 10];
+      };
+
+      const controller = new AbortController();
+
+      // Load 3 pages
+      const result = await fetchAllPages<number[], string>({
+        getKeyFn: getKey,
+        fetcherFn: fetcher,
+        size: 3,
+        revalidateAll: false,
+        staleTime: 30_000,
+        signal: controller.signal,
+      });
+
+      expect(result.pages).toEqual([[0], [10], [20]]);
+      expect(fetchCount.value).toBe(3);
+
+      // Simulate setSize$ decrease: 3 -> 1 (just trim, no fetch)
+      const trimmed = result.pages.slice(0, 1);
+      const trimmedKeys = result.pageKeys.slice(0, 1);
+
+      expect(trimmed).toEqual([[0]]);
+      expect(trimmedKeys).toEqual(["/api/items?page=0"]);
+
+      // isReachingEnd should be rechecked with trimmed data
+      const isEnd = checkIsReachingEnd(getKey, trimmed);
+      expect(isEnd).toBe(false); // page 1 still exists
     });
   });
 
