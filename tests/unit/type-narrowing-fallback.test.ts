@@ -28,16 +28,14 @@ describe("SWRResponseWithData type", () => {
     expectTypeOf<R["data"]>().not.toEqualTypeOf<string[] | undefined>();
   });
 
-  it("mutate$ updater current is Data (not Data | undefined)", () => {
+  it("mutate$ updater current remains Data | undefined (safe for cache misses)", () => {
     type R = SWRResponseWithData<number[]>;
-    // Extract the mutate$ parameter type
     type MutateFn = R["mutate$"] extends QRL<infer F> ? F : never;
-    // The first argument can be Data or updater function
     type FirstArg = Parameters<MutateFn>[0];
-    // When it's a function, current should be Data
     type UpdaterFn = Extract<FirstArg, Function>;
     type UpdaterParams = Parameters<UpdaterFn>;
-    expectTypeOf<UpdaterParams[0]>().toEqualTypeOf<number[]>();
+    // current must include undefined — cache value is not guaranteed
+    expectTypeOf<UpdaterParams[0]>().toEqualTypeOf<number[] | undefined>();
   });
 
   it("inherits other fields from SWRResponse", () => {
@@ -57,6 +55,15 @@ describe("SWRResponse type (no fallbackData)", () => {
     type R = SWRResponse<string[]>;
     expectTypeOf<R["data"]>().toEqualTypeOf<string[] | undefined>();
   });
+
+  it("mutate$ updater current includes undefined", () => {
+    type R = SWRResponse<number[]>;
+    type MutateFn = R["mutate$"] extends QRL<infer F> ? F : never;
+    type FirstArg = Parameters<MutateFn>[0];
+    type UpdaterFn = Extract<FirstArg, Function>;
+    type UpdaterParams = Parameters<UpdaterFn>;
+    expectTypeOf<UpdaterParams[0]>().toEqualTypeOf<number[] | undefined>();
+  });
 });
 
 describe("SWRInfiniteResponseWithData type", () => {
@@ -70,15 +77,15 @@ describe("SWRInfiniteResponseWithData type", () => {
     expectTypeOf<R["data"]>().not.toEqualTypeOf<string[] | undefined>();
   });
 
-  it("mutate$ updater current is Data[] (not Data[] | undefined)", () => {
+  it("mutate$ updater current remains Data[] | undefined (safe for cache misses)", () => {
     type R = SWRInfiniteResponseWithData<number>;
     type MutateFn = R["mutate$"] extends QRL<infer F> ? F : never;
     type FirstArg = Parameters<MutateFn>[0];
     // FirstArg is optional: Data[] | updater | undefined
-    // When it's a function, current should be Data[]
     type UpdaterFn = Extract<NonNullable<FirstArg>, Function>;
     type UpdaterParams = Parameters<UpdaterFn>;
-    expectTypeOf<UpdaterParams[0]>().toEqualTypeOf<number[]>();
+    // current must include undefined — cache value is not guaranteed
+    expectTypeOf<UpdaterParams[0]>().toEqualTypeOf<number[] | undefined>();
   });
 });
 

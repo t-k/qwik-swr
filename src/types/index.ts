@@ -184,16 +184,12 @@ export interface SWRResponse<Data> {
  * SWR response when fallbackData is provided.
  * `data` is guaranteed to be `Data` (never undefined) since fallbackData
  * ensures an initial value exists at all times.
- * `mutate$` updater also receives `Data` (not `Data | undefined`).
+ *
+ * Note: `mutate$` updater's `current` remains `Data | undefined` because
+ * the cache value passed to the updater is not guaranteed to match `data`.
  */
-export interface SWRResponseWithData<Data> extends Omit<SWRResponse<Data>, "data" | "mutate$"> {
+export interface SWRResponseWithData<Data> extends Omit<SWRResponse<Data>, "data"> {
   data: Data;
-  mutate$: QRL<
-    (
-      data: Data | ((current: Data) => Data),
-      options?: { revalidate?: boolean },
-    ) => Promise<void>
-  >;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -528,9 +524,10 @@ export interface SWRInfiniteResponse<Data> {
 /**
  * Infinite response when fallbackData is provided.
  * `data` is guaranteed to be `Data[]` (never undefined).
- * `mutate$` updater also receives `Data[]` (not `Data[] | undefined`).
+ *
+ * Note: `mutate$` updater's `current` remains `Data[] | undefined` because
+ * the cache value passed to the updater is not guaranteed to match `data`.
  */
-export interface SWRInfiniteResponseWithData<Data> extends Omit<SWRInfiniteResponse<Data>, "data" | "mutate$"> {
+export interface SWRInfiniteResponseWithData<Data> extends Omit<SWRInfiniteResponse<Data>, "data"> {
   data: Data[];
-  mutate$: QRL<(data?: Data[] | ((current: Data[]) => Data[]), options?: { revalidate?: boolean }) => Promise<void>>;
 }
