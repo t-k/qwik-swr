@@ -10,3 +10,5 @@ Thumbs.db
 playwright-report/
 test-results/
 examples/basic/dist/
+docs/logs/
+CLAUDE.md
