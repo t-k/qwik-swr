@@ -204,7 +204,7 @@ stateDiagram-v2
 | `keepPreviousData` | `boolean`                                  | `false`                  | Keep previous key's data while fetching new key (Signal keys)    |
 | `enabled`          | `boolean`                                  | `true`                   | Set `false` to disable the hook entirely                         |
 | `eagerness`        | `"visible" \| "load" \| "idle"`            | `"visible"`              | Maps to Qwik's `useVisibleTask$` strategy                        |
-| `onSuccess$`       | `QRL<(data, key) => void>`                 | --                       | Callback on successful fetch                                     |
+| `onSuccess$`       | `QRL<(data, key) => void>`                 | --                       | Callback on data availability (cache hit or successful fetch)    |
 | `onError$`         | `QRL<(error, key) => void>`                | --                       | Callback on fetch error                                          |
 
 ---

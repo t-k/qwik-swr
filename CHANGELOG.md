@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.3] - 2026-03-23
+
+### Fixed
+
+- **`onSuccess$` not firing on cache hit** -- When navigating between pages with cached data, `onSuccess$` was never called because it only fired after a network fetch. Now `onSuccess$` fires immediately when cached data is available at observer attach time. For stale-while-revalidate scenarios, `onSuccess$` fires twice: once with stale cached data, then again with fresh data after revalidation.
+
+### Changed
+
+- `onSuccess$` description updated: "Callback on successful fetch" → "Callback on data availability (cache hit or successful fetch)"
+
 ## [0.3.2] - 2026-03-17
 
 ### Fixed
