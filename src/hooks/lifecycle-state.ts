@@ -38,6 +38,14 @@ export function startFetchLifecycle<Data>(
   // Attach observer to CacheStore
   store.attachObserver(hashedKey, observer as Observer<unknown>, resolved as ResolvedQueryConfig);
 
+  // Fire onSuccess$ on cache hit (data available without fetch)
+  if (resolved.onSuccess$) {
+    const cached = store.getCache(hashedKey);
+    if (cached?.data != null) {
+      void resolved.onSuccess$.resolve().then((fn) => fn(cached.data as Data, rawKey));
+    }
+  }
+
   // Trigger initial fetch
   store.ensureFetch(hashedKey, rawKey, fetcherFn);
 

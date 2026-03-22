@@ -29,6 +29,11 @@ afterEach(() => {
 // startFetchLifecycle
 // ═══════════════════════════════════════════════════════════════
 
+// Helper: create a mock QRL-like object for onSuccess$/onError$
+function mockQRL<T extends (...args: any[]) => void>(fn: T) {
+  return { resolve: () => Promise.resolve(fn) } as any;
+}
+
 describe("startFetchLifecycle", () => {
   const KEY = "s:/api/data" as HashedKey;
   const RAW_KEY = "/api/data";
@@ -109,6 +114,94 @@ describe("startFetchLifecycle", () => {
     lifecycle.teardown();
     lifecycle.teardown();
     lifecycle.teardown();
+  });
+
+  it("should fire onSuccess$ on cache hit (data already in cache)", async () => {
+    // Pre-populate cache
+    store.setCache(KEY, { data: { cached: true }, timestamp: Date.now() });
+
+    const onSuccessFn = vi.fn();
+    const opts = makeOptions({
+      staleTime: 60_000, // fresh data — no revalidation
+      retry: 0,
+      revalidateOn: [],
+      onSuccess$: mockQRL(onSuccessFn),
+    });
+    const observer = makeObserver(KEY);
+    const fetcher = makeFetcher({ value: "fresh" });
+
+    startFetchLifecycle({
+      hashedKey: KEY,
+      rawKey: RAW_KEY,
+      fetcherFn: fetcher,
+      observer,
+      resolved: opts,
+    });
+
+    await flush();
+
+    // onSuccess$ should fire with cached data
+    expect(onSuccessFn).toHaveBeenCalledTimes(1);
+    expect(onSuccessFn).toHaveBeenCalledWith({ cached: true }, RAW_KEY);
+
+    // No fetch should have occurred (data is fresh)
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("should not fire onSuccess$ when cache is empty", async () => {
+    const onSuccessFn = vi.fn();
+    const opts = makeOptions({
+      staleTime: 0,
+      retry: 0,
+      revalidateOn: [],
+      onSuccess$: mockQRL(onSuccessFn),
+    });
+    const observer = makeObserver(KEY);
+    const fetcher = makeFetcher({ value: 42 });
+
+    startFetchLifecycle({
+      hashedKey: KEY,
+      rawKey: RAW_KEY,
+      fetcherFn: fetcher,
+      observer,
+      resolved: opts,
+    });
+
+    await flush();
+
+    // onSuccess$ should fire once from the fetch, not from cache hit
+    expect(onSuccessFn).toHaveBeenCalledTimes(1);
+    expect(onSuccessFn).toHaveBeenCalledWith({ value: 42 }, RAW_KEY);
+  });
+
+  it("should fire onSuccess$ on both cache hit and revalidation when data is stale", async () => {
+    // Pre-populate cache with stale data
+    store.setCache(KEY, { data: { old: true }, timestamp: Date.now() - 60_000 });
+
+    const onSuccessFn = vi.fn();
+    const opts = makeOptions({
+      staleTime: 30_000, // data is 60s old, staleTime is 30s → stale
+      retry: 0,
+      revalidateOn: [],
+      onSuccess$: mockQRL(onSuccessFn),
+    });
+    const observer = makeObserver(KEY);
+    const fetcher = makeFetcher({ fresh: true });
+
+    startFetchLifecycle({
+      hashedKey: KEY,
+      rawKey: RAW_KEY,
+      fetcherFn: fetcher,
+      observer,
+      resolved: opts,
+    });
+
+    await flush();
+
+    // onSuccess$ should fire twice: once for cache hit, once for revalidation
+    expect(onSuccessFn).toHaveBeenCalledTimes(2);
+    expect(onSuccessFn).toHaveBeenNthCalledWith(1, { old: true }, RAW_KEY);
+    expect(onSuccessFn).toHaveBeenNthCalledWith(2, { fresh: true }, RAW_KEY);
   });
 
   it("should register and clean up interval timer", async () => {
