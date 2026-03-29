@@ -50,11 +50,12 @@
   "devDependencies": {
     "@builder.io/qwik": "^1.19.1",
     "@playwright/test": "^1.58.1",
+    "@types/node": "^25.5.0",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.0.0",
     "oxfmt": "^0.42.0",
     "oxlint": "^1.50.0",
-    "typescript": "^5.7.3",
+    "typescript": "^6.0.2",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
   },

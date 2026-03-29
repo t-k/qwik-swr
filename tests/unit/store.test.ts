@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type {
   CacheEntry,
+  CacheStorage,
   HashedKey,
   ResolvedSWROptions,
   FetcherCtx,
@@ -2344,7 +2345,7 @@ describe("Lazy Hydration Race Condition (MF-1 + SF-2)", () => {
       size: vi.fn(async () => 1),
     };
 
-    await store.initStorage(storageMock, "lazy");
+    await store.initStorage(storageMock as CacheStorage, "lazy");
 
     // Trigger multiple concurrent hydrations via getCache
     store.getCache(KEY);
@@ -2374,7 +2375,7 @@ describe("Lazy Hydration Race Condition (MF-1 + SF-2)", () => {
       size: vi.fn(async () => 1),
     };
 
-    await store.initStorage(storageMock, "lazy");
+    await store.initStorage(storageMock as CacheStorage, "lazy");
 
     // Trigger hydration via attachObserver (which calls hydrateKey)
     const observer = makeObserver(KEY);
@@ -2409,7 +2410,7 @@ describe("Lazy Hydration Race Condition (MF-1 + SF-2)", () => {
       size: vi.fn(async () => 1),
     };
 
-    await store.initStorage(storageMock, "lazy");
+    await store.initStorage(storageMock as CacheStorage, "lazy");
 
     // Trigger two concurrent hydrations via attachObserver and getCache
     const observer1 = makeObserver(KEY);
@@ -2446,7 +2447,7 @@ describe("Lazy Hydration Race Condition (MF-1 + SF-2)", () => {
       size: vi.fn(async () => 1),
     };
 
-    await store.initStorage(storageMock, "lazy");
+    await store.initStorage(storageMock as CacheStorage, "lazy");
 
     // First call triggers hydration
     const result1 = store.getCache(KEY);

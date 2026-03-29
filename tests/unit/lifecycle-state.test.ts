@@ -89,7 +89,7 @@ describe("startFetchLifecycle", () => {
     lifecycle.teardown();
 
     // After teardown, setCache should not notify this observer
-    observer.onData.mockClear();
+    (observer.onData as ReturnType<typeof vi.fn>).mockClear();
     store.setCache(KEY, { data: "new-data", timestamp: Date.now() });
 
     expect(observer.onData).not.toHaveBeenCalled();

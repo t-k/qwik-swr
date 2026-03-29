@@ -257,6 +257,7 @@ describe("prefetch integration", () => {
         retry: 0,
         retryInterval: 1000,
         timeout: 0,
+        keepPreviousData: false,
       } as ResolvedSWROptions;
       store.attachObserver(hashedKey, observer, opts);
 

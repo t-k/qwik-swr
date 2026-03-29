@@ -29,6 +29,7 @@ function minOpts() {
     retry: 0,
     retryInterval: 1000,
     timeout: 30_000,
+    keepPreviousData: false,
   };
 }
 

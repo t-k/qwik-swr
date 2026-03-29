@@ -220,12 +220,12 @@ describe("Lazy hydration", () => {
   it("should allow re-hydration when async storage.get() fails", async () => {
     let callCount = 0;
     const storage: CacheStorage = {
-      get(_key: HashedKey) {
+      get<Data>(_key: HashedKey): Promise<CacheEntry<Data> | null> {
         callCount++;
         if (callCount === 1) {
           return Promise.reject(new Error("storage error"));
         }
-        return Promise.resolve({ data: "recovered", timestamp: 100 } as CacheEntry);
+        return Promise.resolve({ data: "recovered", timestamp: 100 } as CacheEntry<Data>);
       },
       set() {
         return Promise.resolve();

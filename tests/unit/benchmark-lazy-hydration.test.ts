@@ -15,9 +15,9 @@ function createFakeStorage(entryCount: number): CacheStorage & { getCalls: numbe
     get getCalls() {
       return tracker.getCalls;
     },
-    get(key: HashedKey): CacheEntry | null {
+    get<Data>(key: HashedKey): CacheEntry<Data> | null {
       tracker.getCalls++;
-      return data.get(key) ?? null;
+      return (data.get(key) as CacheEntry<Data> | undefined) ?? null;
     },
     set(key: HashedKey, entry: CacheEntry): void {
       data.set(key, entry);

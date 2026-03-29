@@ -17,14 +17,14 @@ import {
 // Helpers
 // ═══════════════════════════════════════════════════════════════
 
-function makeOptions(overrides: Partial<ResolvedQueryConfig> = {}): ResolvedQueryConfig {
+function makeOptions<Data = unknown>(overrides: Partial<ResolvedQueryConfig<Data>> = {}): ResolvedQueryConfig<Data> {
   return makeOptionsBase({
     staleTime: 0,
     retry: 0,
     revalidateOn: [],
     keepPreviousData: false,
-    ...overrides,
-  });
+    ...overrides as Partial<ResolvedQueryConfig>,
+  }) as ResolvedQueryConfig<Data>;
 }
 
 function makeState<Data>(overrides: Partial<SWRState<Data>> = {}): SWRState<Data> {
@@ -131,7 +131,7 @@ afterEach(() => {
 describe("Signal key transitions (store + observer level)", () => {
   describe("disabled -> valid key transition", () => {
     it("should start fetching when key becomes valid", async () => {
-      const opts = makeOptions();
+      const opts = makeOptions<string>();
       const state = makeState<string>();
       const fetcher = makeFetcher("user-data");
 
@@ -155,7 +155,7 @@ describe("Signal key transitions (store + observer level)", () => {
 
   describe("valid -> disabled key transition", () => {
     it("should teardown and reset state", async () => {
-      const opts = makeOptions();
+      const opts = makeOptions<string>();
       const state = makeState<string>();
       const fetcher = makeFetcher("user-data");
 
@@ -176,7 +176,7 @@ describe("Signal key transitions (store + observer level)", () => {
 
   describe("valid A -> valid B key transition", () => {
     it("should teardown A observer and start fetch for B", async () => {
-      const opts = makeOptions();
+      const opts = makeOptions<string>();
       const state = makeState<string>();
 
       const fetcher = vi.fn(async (ctx: any) => {
@@ -206,7 +206,7 @@ describe("Signal key transitions (store + observer level)", () => {
     });
 
     it("should detach A observer so A setCache does not affect B state", async () => {
-      const opts = makeOptions();
+      const opts = makeOptions<string>();
       const state = makeState<string>();
       const fetcher = makeFetcher("initial");
 
@@ -230,7 +230,7 @@ describe("Signal key transitions (store + observer level)", () => {
 
   describe("inflight fetch abort on key change", () => {
     it("should abort inflight fetch when key changes", async () => {
-      const opts = makeOptions();
+      const opts = makeOptions<string>();
       const state = makeState<string>();
 
       // Slow fetcher that takes 1000ms
@@ -293,7 +293,7 @@ describe("Signal key transitions (store + observer level)", () => {
 
 describe("keepPreviousData", () => {
   it("should retain previous data during key transition when enabled", async () => {
-    const opts = makeOptions({ keepPreviousData: true });
+    const opts = makeOptions<string>({ keepPreviousData: true });
     const state = makeState<string>();
 
     const fetcher = vi.fn(async (ctx: any) => {
@@ -323,7 +323,7 @@ describe("keepPreviousData", () => {
   });
 
   it("should reset data on disabled transition even with keepPreviousData", async () => {
-    const opts = makeOptions({ keepPreviousData: true });
+    const opts = makeOptions<string>({ keepPreviousData: true });
     const state = makeState<string>();
 
     const fetcher = makeFetcher("data-A");
@@ -342,7 +342,7 @@ describe("keepPreviousData", () => {
   });
 
   it("should not retain data when keepPreviousData is false", async () => {
-    const opts = makeOptions({ keepPreviousData: false });
+    const opts = makeOptions<string>({ keepPreviousData: false });
     const state = makeState<string>();
 
     const fetcher = vi.fn(async (ctx: any) => {

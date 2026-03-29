@@ -52,6 +52,7 @@ export function makeOptions(overrides: Partial<ResolvedQueryConfig> = {}): Resol
     retry: 3,
     retryInterval: 1_000,
     timeout: 30_000,
+    keepPreviousData: false,
     ...overrides,
   } as ResolvedQueryConfig;
 }

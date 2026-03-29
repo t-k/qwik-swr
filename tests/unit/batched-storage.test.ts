@@ -20,8 +20,8 @@ function createTestStorage(): CacheStorage & {
     get clearCalls() {
       return clearCalls;
     },
-    get(key: HashedKey) {
-      return _store.get(key) ?? null;
+    get<Data>(key: HashedKey): CacheEntry<Data> | null {
+      return (_store.get(key) as CacheEntry<Data> | undefined) ?? null;
     },
     set(key: HashedKey, entry: CacheEntry) {
       setCalls.push({ key, entry });
