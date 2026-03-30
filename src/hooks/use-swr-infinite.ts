@@ -27,7 +27,7 @@ import { fetchAllPages, checkIsReachingEnd, applyKeyChangeReset } from "./infini
 import type { PageRetryConfig, FetchPagesResult } from "./infinite-helpers.ts";
 
 // Re-export helpers for public API consumers
-export { resolvePageKeys, checkIsReachingEnd, fetchAllPages, fetchPageWithRetry, calculateRetryDelay, applyKeyChangeReset } from "./infinite-helpers.ts";
+export { resolvePageKeys, checkIsReachingEnd, fetchAllPages, fetchPageWithRetry, calculateRetryDelay } from "./infinite-helpers.ts";
 export type { FetchPagesContext, FetchPagesResult, PageRetryConfig } from "./infinite-helpers.ts";
 
 // ═══════════════════════════════════════════════════════════════
@@ -354,8 +354,9 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
         // Resolve cooldown key for dedup
         const firstKey = getKeyFn(0, null);
         if (firstKey !== null) {
-          _internal.cooldownKey = hashKey(firstKey) as HashedKey;
-          _internal.prevFirstKeyHash = hashKey(firstKey);
+          const hashed = hashKey(firstKey);
+          _internal.cooldownKey = hashed as HashedKey;
+          _internal.prevFirstKeyHash = hashed;
         }
       }
 

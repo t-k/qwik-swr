@@ -257,7 +257,7 @@ export async function fetchAllPages<Data, K extends ValidKey>(
  * Updates _internal.prevFirstKeyHash as a side effect.
  */
 export function applyKeyChangeReset<Data>(
-  state: { data: Data[] | undefined; error: unknown | undefined; isReachingEnd: boolean },
+  state: { data: Data[] | undefined; error: SWRError | undefined; isReachingEnd: boolean },
   _internal: { prevFirstKeyHash: HashedKey | null },
   newKeyHash: HashedKey | null,
   keepPreviousData: boolean,
