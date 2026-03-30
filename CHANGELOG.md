@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`keepPreviousData` option for `useSWRInfinite`** -- Preserves previous page data during key transitions, preventing flicker on SSR hydration when reactive keys momentarily become null. Same semantics as `useSWR`'s `keepPreviousData`: data is retained when the key changes, but always reset on disabled transitions (null/undefined/false key).
+
 ## [0.3.3] - 2026-03-23
 
 ### Fixed

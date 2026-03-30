@@ -273,12 +273,6 @@ export function applyKeyChangeReset<Data>(
     return;
   }
 
-  // First invocation: just record the key, no reset needed
-  if (_internal.prevFirstKeyHash === null) {
-    _internal.prevFirstKeyHash = newKeyHash;
-    return;
-  }
-
   if (keyChanged) {
     _internal.prevFirstKeyHash = newKeyHash;
     if (!keepPreviousData) {

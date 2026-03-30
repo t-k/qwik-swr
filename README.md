@@ -344,6 +344,7 @@ Inherited behavior from `useSWR`: retry with exponential backoff (per page), per
 | `initialSize`          | `number`  | `1`     | Number of pages to load initially                         |
 | `revalidateAll`        | `boolean` | `false` | Revalidate all pages on event triggers (not just first)   |
 | `fallbackData`         | `Data[]`  | --      | Pre-loaded pages from SSR (e.g. `routeLoader$`)           |
+| `keepPreviousData`     | `boolean` | `false` | Keep previous data while fetching after key change        |
 | `onSuccess$`           | `QRL`     | --      | `(data: Data[], key) => void`                             |
 | `onError$`             | `QRL`     | --      | `(error: SWRError, key) => void`                          |
 
