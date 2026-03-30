@@ -913,7 +913,7 @@ describe("swr-infinite integration tests", () => {
     it("should preserve state.data when keepPreviousData is true and key changes", () => {
       const state = {
         data: [["page0-A"], ["page1-A"]] as string[][] | undefined,
-        error: undefined as unknown,
+        error: undefined as SWRError | undefined,
         isReachingEnd: false,
       };
       const _internal = {
@@ -926,10 +926,34 @@ describe("swr-infinite integration tests", () => {
       expect(_internal.prevFirstKeyHash).toBe(hashKey("/api/b"));
     });
 
+    it("should clear stale error on key change even with keepPreviousData true", () => {
+      const staleError: SWRError = {
+        type: "fetch",
+        message: "previous key failed",
+        status: 500,
+        retryCount: 0,
+        timestamp: Date.now(),
+      };
+      const state = {
+        data: [["page0-A"]] as string[][] | undefined,
+        error: staleError as SWRError | undefined,
+        isReachingEnd: false,
+      };
+      const _internal = {
+        prevFirstKeyHash: hashKey("/api/a") as HashedKey | null,
+      };
+
+      applyKeyChangeReset(state, _internal, hashKey("/api/b"), true);
+
+      // Data preserved, but stale error cleared
+      expect(state.data).toEqual([["page0-A"]]);
+      expect(state.error).toBeUndefined();
+    });
+
     it("should clear state.data when keepPreviousData is false and key changes", () => {
       const state = {
         data: [["page0-A"], ["page1-A"]] as string[][] | undefined,
-        error: undefined as unknown,
+        error: undefined as SWRError | undefined,
         isReachingEnd: false,
       };
       const _internal = {
@@ -947,7 +971,7 @@ describe("swr-infinite integration tests", () => {
     it("should clear state.data on disabled transition even with keepPreviousData true", () => {
       const state = {
         data: [["page0-A"]] as string[][] | undefined,
-        error: undefined as unknown,
+        error: undefined as SWRError | undefined,
         isReachingEnd: false,
       };
       const _internal = {
@@ -965,7 +989,7 @@ describe("swr-infinite integration tests", () => {
     it("should not reset state when key has not changed", () => {
       const state = {
         data: [["page0-A"], ["page1-A"]] as string[][] | undefined,
-        error: undefined as unknown,
+        error: undefined as SWRError | undefined,
         isReachingEnd: false,
       };
       const keyHash = hashKey("/api/a");

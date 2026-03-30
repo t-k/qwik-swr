@@ -281,9 +281,10 @@ export function applyKeyChangeReset<Data>(
 
   if (keyChanged) {
     _internal.prevFirstKeyHash = newKeyHash;
+    // Always clear error on key change: stale errors are confusing, unlike stale data
+    state.error = undefined;
     if (!keepPreviousData) {
       state.data = undefined;
-      state.error = undefined;
       state.isReachingEnd = false;
     }
     return;
