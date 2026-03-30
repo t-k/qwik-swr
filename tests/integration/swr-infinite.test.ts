@@ -978,5 +978,24 @@ describe("swr-infinite integration tests", () => {
       expect(state.data).toEqual([["page0-A"], ["page1-A"]]);
       expect(_internal.prevFirstKeyHash).toBe(keyHash);
     });
+
+    it("should only record key on first invocation without resetting state", () => {
+      const state = {
+        data: [["page0-A"]] as string[][],
+        error: undefined as SWRError | undefined,
+        isReachingEnd: false,
+      };
+      const _internal = {
+        prevFirstKeyHash: null as HashedKey | null,
+      };
+      const keyHash = hashKey("/api/a");
+
+      // First invocation: prevFirstKeyHash is null
+      applyKeyChangeReset(state, _internal, keyHash, false);
+
+      // Should record key without resetting state
+      expect(state.data).toEqual([["page0-A"]]);
+      expect(_internal.prevFirstKeyHash).toBe(keyHash);
+    });
   });
 });
