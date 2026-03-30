@@ -241,3 +241,47 @@ export async function fetchAllPages<Data, K extends ValidKey>(
 
   return { pages, reachedEnd, pageKeys };
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Key change reset logic for keepPreviousData
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Apply state reset on key change for useSWRInfinite.
+ *
+ * - null newKeyHash (disabled transition): always reset, regardless of keepPreviousData
+ * - key changed + keepPreviousData false: reset state
+ * - key changed + keepPreviousData true: preserve state
+ * - key unchanged: no-op
+ *
+ * Updates _internal.prevFirstKeyHash as a side effect.
+ */
+export function applyKeyChangeReset<Data>(
+  state: { data: Data[] | undefined; error: unknown | undefined; isReachingEnd: boolean },
+  _internal: { prevFirstKeyHash: HashedKey | null },
+  newKeyHash: HashedKey | null,
+  keepPreviousData: boolean,
+): void {
+  const keyChanged = _internal.prevFirstKeyHash !== newKeyHash;
+
+  if (newKeyHash === null) {
+    // Disabled transition: always reset
+    state.data = undefined;
+    state.error = undefined;
+    state.isReachingEnd = false;
+    _internal.prevFirstKeyHash = null;
+    return;
+  }
+
+  if (keyChanged) {
+    _internal.prevFirstKeyHash = newKeyHash;
+    if (!keepPreviousData) {
+      state.data = undefined;
+      state.error = undefined;
+      state.isReachingEnd = false;
+    }
+    return;
+  }
+
+  // Key unchanged: no-op
+}

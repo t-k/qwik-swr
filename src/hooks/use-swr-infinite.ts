@@ -23,11 +23,11 @@ import { isContextNotFoundError } from "../utils/context-error.ts";
 import { isDev, generateId } from "../utils/env.ts";
 import { initEventManager } from "../cache/event-manager.ts";
 import { timerCoordinator } from "../cache/timer-coordinator.ts";
-import { fetchAllPages, checkIsReachingEnd } from "./infinite-helpers.ts";
+import { fetchAllPages, checkIsReachingEnd, applyKeyChangeReset } from "./infinite-helpers.ts";
 import type { PageRetryConfig, FetchPagesResult } from "./infinite-helpers.ts";
 
 // Re-export helpers for public API consumers
-export { resolvePageKeys, checkIsReachingEnd, fetchAllPages, fetchPageWithRetry, calculateRetryDelay } from "./infinite-helpers.ts";
+export { resolvePageKeys, checkIsReachingEnd, fetchAllPages, fetchPageWithRetry, calculateRetryDelay, applyKeyChangeReset } from "./infinite-helpers.ts";
 export type { FetchPagesContext, FetchPagesResult, PageRetryConfig } from "./infinite-helpers.ts";
 
 // ═══════════════════════════════════════════════════════════════
@@ -83,6 +83,7 @@ interface InfiniteInternal {
   fetchGeneration: number;
   pageKeyHashes: HashedKey[];
   cooldownKey: HashedKey;
+  prevFirstKeyHash: HashedKey | null;
 }
 
 /** Context passed to module-level executeFetch / abortCurrentFetch. */
@@ -248,6 +249,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     retryInterval: options.retryInterval,
     timeout: options.timeout,
     eagerness: options.eagerness,
+    keepPreviousData: options.keepPreviousData,
   } : undefined);
   const fallback = options?.fallbackData;
   const infiniteOpts = {
@@ -284,6 +286,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
     fetchGeneration: 0,
     pageKeyHashes: [],
     cooldownKey: "" as HashedKey,
+    prevFirstKeyHash: null,
   });
 
   // Context object for module-level functions.
@@ -305,6 +308,12 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
 
       const doFetch = async (size: number, revalidateAll: boolean) => {
         if (_internal.tornDown) return;
+
+        // Key change detection + keepPreviousData gate
+        const firstKey = getKeyFn(0, null);
+        const newKeyHash = firstKey !== null ? hashKey(firstKey) : null;
+        applyKeyChangeReset(state, _internal, newKeyHash, resolved.keepPreviousData);
+        if (newKeyHash === null) return; // disabled: skip fetch
 
         // SF-3: Update size BEFORE executeFetch so it's correct even if fetch throws
         _internal.currentSize = size;
@@ -346,6 +355,7 @@ export function useSWRInfinite<Data, K extends ValidKey = ValidKey>(
         const firstKey = getKeyFn(0, null);
         if (firstKey !== null) {
           _internal.cooldownKey = hashKey(firstKey) as HashedKey;
+          _internal.prevFirstKeyHash = hashKey(firstKey);
         }
       }
 

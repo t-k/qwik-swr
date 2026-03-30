@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { store } from "../../src/cache/store.ts";
 import { hashKey } from "../../src/utils/hash.ts";
 import { fetchAllPages, fetchPageWithRetry, calculateRetryDelay, checkIsReachingEnd } from "../../src/hooks/infinite-helpers.ts";
-import type { SWRInfiniteKeyLoader, FetcherCtx, SWRError, ResolvedQueryConfig } from "../../src/types/index.ts";
+import { applyKeyChangeReset } from "../../src/hooks/infinite-helpers.ts";
+import type { SWRInfiniteKeyLoader, FetcherCtx, SWRError, ResolvedQueryConfig, HashedKey } from "../../src/types/index.ts";
 
 describe("swr-infinite integration tests", () => {
   beforeEach(() => {
@@ -901,6 +902,81 @@ describe("swr-infinite integration tests", () => {
         "/api/items?cursor=cursor-1",
         "/api/items?cursor=cursor-2",
       ]);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // keepPreviousData - state reset on key change
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("keepPreviousData", () => {
+    it("should preserve state.data when keepPreviousData is true and key changes", () => {
+      const state = {
+        data: [["page0-A"], ["page1-A"]] as string[][] | undefined,
+        error: undefined as unknown,
+        isReachingEnd: false,
+      };
+      const _internal = {
+        prevFirstKeyHash: hashKey("/api/a") as HashedKey | null,
+      };
+
+      applyKeyChangeReset(state, _internal, hashKey("/api/b"), true);
+
+      expect(state.data).toEqual([["page0-A"], ["page1-A"]]);
+      expect(_internal.prevFirstKeyHash).toBe(hashKey("/api/b"));
+    });
+
+    it("should clear state.data when keepPreviousData is false and key changes", () => {
+      const state = {
+        data: [["page0-A"], ["page1-A"]] as string[][] | undefined,
+        error: undefined as unknown,
+        isReachingEnd: false,
+      };
+      const _internal = {
+        prevFirstKeyHash: hashKey("/api/a") as HashedKey | null,
+      };
+
+      applyKeyChangeReset(state, _internal, hashKey("/api/b"), false);
+
+      expect(state.data).toBeUndefined();
+      expect(state.error).toBeUndefined();
+      expect(state.isReachingEnd).toBe(false);
+      expect(_internal.prevFirstKeyHash).toBe(hashKey("/api/b"));
+    });
+
+    it("should clear state.data on disabled transition even with keepPreviousData true", () => {
+      const state = {
+        data: [["page0-A"]] as string[][] | undefined,
+        error: undefined as unknown,
+        isReachingEnd: false,
+      };
+      const _internal = {
+        prevFirstKeyHash: hashKey("/api/a") as HashedKey | null,
+      };
+
+      applyKeyChangeReset(state, _internal, null, true);
+
+      expect(state.data).toBeUndefined();
+      expect(state.error).toBeUndefined();
+      expect(state.isReachingEnd).toBe(false);
+      expect(_internal.prevFirstKeyHash).toBeNull();
+    });
+
+    it("should not reset state when key has not changed", () => {
+      const state = {
+        data: [["page0-A"], ["page1-A"]] as string[][] | undefined,
+        error: undefined as unknown,
+        isReachingEnd: false,
+      };
+      const keyHash = hashKey("/api/a");
+      const _internal = {
+        prevFirstKeyHash: keyHash as HashedKey | null,
+      };
+
+      applyKeyChangeReset(state, _internal, keyHash, false);
+
+      expect(state.data).toEqual([["page0-A"], ["page1-A"]]);
+      expect(_internal.prevFirstKeyHash).toBe(keyHash);
     });
   });
 });
