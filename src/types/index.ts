@@ -494,6 +494,8 @@ export interface SWRInfiniteOptions<Data = unknown> extends CommonSWROptions {
   revalidateAll?: boolean;
   /** Pre-loaded page data (e.g. from SSR via routeLoader$). Skips initial fetch when provided. */
   fallbackData?: Data[];
+  /** Keep previous data while fetching after key change. Resets on disabled transition. */
+  keepPreviousData?: boolean;
   onSuccess$?: QRL<(data: Data[], key: ValidKey) => void>;
   onError$?: QRL<(error: SWRError, key: ValidKey) => void>;
 }
